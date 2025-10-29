@@ -1,0 +1,15 @@
+# 配置文件
+config.py
+
+# 数据文件
+*.csv
+*.png
+*.log
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+

@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "数据源"
+version = "0.1.0"
+description = "金融数据获取项目"
+dependencies = [
+    "xtquant",
+    "pandas",
+    "numpy",
+    "WindPy",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["src*", "firstBan*"]
+
+[tool.setuptools.package-dir]
+"" = "."
+"firstBan" = "D:/pythonProject/firstBan"
+

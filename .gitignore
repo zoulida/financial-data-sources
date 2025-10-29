@@ -1,0 +1,99 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual Environment
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# Data files (large files that shouldn't be in git)
+*.csv
+*.xlsx
+*.xls
+*.parquet
+*.h5
+*.hdf5
+*.pkl
+*.pickle
+
+# Log files
+*.log
+*.out
+
+# Cache directories
+cache/
+__pycache__/
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+
+# Wind API cache
+*.shelve
+*.shelve.bak
+*.shelve.dir
+*.shelve.dat
+
+# Test outputs
+test_output.txt
+test_result.txt
+
+# Dump files
+*.dmp
+
+# Large data directories
+data/
+cache/
+
+# Specific large files
+930997_changes_20240101_20251024.csv
+930997_constituents_20240131.csv
+ratio_monitor_xtdata.csv
+ratio_monitor_xtdata.log
+test_output.txt
+test_venv_config.py
+中证全指成分股_20251028.csv

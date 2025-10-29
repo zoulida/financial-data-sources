@@ -1,0 +1,144 @@
+# Wind数据源使用规则
+
+## 数据获取优先级
+当用户请求数据时，优先使用Wind的以下API获取数据：
+- **WSD (Wind Series Data)**: 用于获取时间序列数据
+- **WSS (Wind Series Snapshot)**: 用于获取截面数据
+
+## 字段参考文档
+查找field字段时，请参考 `src/winds/merged_fields_fixed.txt` 文档，该文档包含了所有可用的Wind字段映射。
+
+## 常用字段示例
+
+### 市场行情数据 (WSD)
+```python
+# 基本行情数据
+fields = [
+    "close",      # 收盘价
+    "open",       # 开盘价  
+    "high",       # 最高价
+    "low",        # 最低价
+    "volume",     # 成交量
+    "amt",        # 成交额
+    "pct_chg",    # 涨跌幅
+    "turn",       # 换手率
+    "val_mv_ARD", # 总市值
+    "val_mvc"     # 流通市值
+]
+
+# 估值指标
+fields = [
+    "pe_ttm",     # 市盈率(TTM)
+    "pb_mrq",     # 市净率(MRQ)
+    "ps_ttm",     # 市销率(TTM)
+    "dividendyield2"  # 股息率(近12个月)
+]
+```
+
+### 基本资料数据 (WSS)
+```python
+# 基本信息
+fields = [
+    "sec_name",           # 证券简称
+    "comp_name",          # 公司中文名称
+    "industry_sw",        # 申万行业名称
+    "industry_swcode",    # 申万行业代码
+    "mkt",               # 上市板
+    "ipo_date"           # 上市日期
+]
+```
+
+## 代码生成规则
+
+### WSD调用模板
+```python
+from WindPy import w
+
+# 初始化Wind接口
+w.start()
+
+# 获取时间序列数据
+data = w.wsd(
+    codes="股票代码",           # 如: "000001.SZ"
+    fields="字段列表",          # 如: "close,volume,amt"
+    beginTime="开始日期",       # 如: "20240101"
+    endTime="结束日期",         # 如: "20241231"
+    options="可选参数"          # 如: "Period=W;Days=Trading"
+)
+
+# 检查错误
+if data.ErrorCode != 0:
+    print(f"错误代码: {data.ErrorCode}")
+else:
+    print("数据获取成功")
+    # 处理数据...
+
+# 关闭Wind接口
+w.stop()
+```
+
+### WSS调用模板
+```python
+from WindPy import w
+
+# 初始化Wind接口
+w.start()
+
+# 获取截面数据
+data = w.wss(
+    codes="股票代码列表",       # 如: ["000001.SZ", "000002.SZ"]
+    fields="字段列表",          # 如: "sec_name,pe_ttm,pb_mrq"
+    options="可选参数"          # 如: "tradeDate=20241201"
+)
+
+# 检查错误
+if data.ErrorCode != 0:
+    print(f"错误代码: {data.ErrorCode}")
+else:
+    print("数据获取成功")
+    # 处理数据...
+
+# 关闭Wind接口
+w.stop()
+```
+
+## 注意事项
+
+1. **字段查找**: 始终在 `merged_fields_fixed.txt` 中查找正确的字段名称
+2. **错误处理**: 每次调用后都要检查 `ErrorCode` 是否为0
+3. **资源管理**: 使用完毕后调用 `w.stop()` 关闭Wind接口
+4. **数据格式**: Wind返回的数据结构包含 `Data`, `Codes`, `Fields`, `Times` 等字段
+5. **日期格式**: 支持多种日期格式，如 "20240101", "2024-01-01", "-5D" 等
+
+## 常用参数说明
+
+### WSD常用options
+- `Period=W`: 周数据
+- `Period=M`: 月数据  
+- `Period=Q`: 季数据
+- `Days=Trading`: 仅交易日
+- `Fill=Previous`: 前向填充
+
+### WSS常用options
+- `tradeDate=20241201`: 指定交易日期
+- `unit=1`: 数据单位
+- `rptDate=20241201`: 报告期日期
+
+## 数据后处理建议
+
+```python
+import pandas as pd
+
+# 将Wind数据转换为DataFrame
+df = pd.DataFrame(data.Data, columns=data.Fields, index=data.Times)
+df.index.name = 'Date'
+
+# 或者按股票代码组织数据
+df_dict = {}
+for i, code in enumerate(data.Codes):
+    df_dict[code] = pd.DataFrame(
+        [row[i] for row in data.Data], 
+        columns=data.Fields, 
+        index=data.Times
+    )
+```

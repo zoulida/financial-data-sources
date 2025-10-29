@@ -1,0 +1,93 @@
+# 数据获取优先级规则
+
+## 数据源优先级
+当用户请求金融数据时，请按以下优先级选择数据源：
+
+### 1. 优先使用 XtQuant (xtdata)
+- **参考文档**: `md/xtdata/xtdata_api_guide.md`
+- **适用场景**: 行情数据、合约信息、实时数据等（**不包含财务数据**）
+- **优势**: 功能全面、字段完整、性能优秀
+- **主要接口**:
+  - `xtdata.get_market_data_ex()` - 获取行情数据
+  - `xtdata.get_instrument_detail()` - 获取合约信息
+  - `xtdata.subscribe_quote()` - 订阅实时数据
+- **限制**: XtQuant 不再获取财务数据，财务数据请使用 Wind API
+
+### 2. 财务数据使用 Wind API
+- **参考文档**: `md/winds/Wind数据获取完整指南.md`
+- **适用场景**: 所有财务数据获取需求，以及当XtQuant无法满足需求时
+- **主要接口**:
+  - `w.wsd()` - 时间序列数据
+  - `w.wss()` - 截面数据
+- **优势**: 财务数据完整、准确、更新及时
+
+## 代码生成规则
+
+### 1. 行情数据使用 XtQuant
+```python
+from xtquant import xtdata
+import pandas as pd
+
+# 初始化
+xtdata.set_token('your_token_here')
+
+# 获取行情数据示例
+data = xtdata.get_market_data_ex(
+    field_list=['open', 'high', 'low', 'close', 'volume', 'amount'],
+    stock_list=['000001.SZ'],
+    period='1d',
+    count=100
+)
+```
+
+### 2. 财务数据使用 Wind API
+```python
+import WindPy as w
+import pandas as pd
+
+# 初始化
+w.start()
+
+# 获取财务数据示例
+data = w.wss("000001.SZ", "pe_ttm,pb_lf,roe,roa", "tradeDate=20231231")
+df = pd.DataFrame(data.Data, columns=data.Fields, index=data.Codes)
+```
+
+### 3. 字段查找规则
+- **XtQuant字段**: 参考 `md/xtdata/xtdata_api_guide.md` 中的完整字段列表（仅限行情数据）
+- **Wind字段**: 参考 `md/winds/Wind数据获取完整指南.md` 中的字段映射表
+- **完整字段**: 如需查找所有字段，参考 `md/winds/merged_fields_fixed.txt`
+
+### 4. 数据转换建议
+```python
+# XtQuant数据转DataFrame
+df = pd.DataFrame(data['close'].T)
+df.index.name = 'Date'
+
+# Wind数据转DataFrame  
+df = pd.DataFrame(data.Data, columns=data.Fields, index=data.Times)
+df.index.name = 'Date'
+```
+
+## 错误处理
+1. **行情数据**: 优先尝试XtQuant接口
+2. **财务数据**: 直接使用Wind API
+3. 如果XtQuant失败或字段不支持，再尝试Wind API
+4. 提供清晰的错误信息和解决方案
+
+## 注意事项
+- 始终检查数据获取的ErrorCode
+- 提供完整的数据处理代码
+- 包含必要的导入语句
+- 添加适当的错误处理机制
+- **重要**: XtQuant 仅用于行情数据，财务数据必须使用 Wind API
+
+## 官方文档参考
+- **XtQuant官方文档**: http://dict.thinktrader.net/nativeApi/xtdata.html?id=nOY9mc
+- **Wind API**: 参考Wind官方文档
+
+---
+**使用说明**: 此规则确保数据获取的优先级和一致性：
+- **行情数据**: 优先使用XtQuant
+- **财务数据**: 必须使用Wind API
+- 确保数据获取的完整性和准确性
