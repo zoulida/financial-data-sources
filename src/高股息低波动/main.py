@@ -23,7 +23,7 @@ class HighDividendLowVolatilitySelector:
     def __init__(
         self,
         output_dir: Optional[Path] = None,
-        top_n: int = 30,
+        top_n: int = 100,
     ) -> None:
         """
         初始化选择器.
@@ -291,8 +291,8 @@ def main() -> None:
     parser.add_argument(
         "--top-n",
         type=int,
-        default=30,
-        help="选取前N只股票（默认30）",
+        default=100,
+        help="选取前N只股票（默认100）",
     )
     parser.add_argument(
         "--output-dir",

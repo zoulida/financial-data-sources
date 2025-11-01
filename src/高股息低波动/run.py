@@ -7,11 +7,11 @@ from main import HighDividendLowVolatilitySelector
 def run_with_default_settings() -> None:
     """使用默认设置运行筛选."""
     print("使用默认设置运行高股息低波动股票筛选...")
-    print("- 前30只股票")
+    print("- 前100只股票")
     print("- 输出到 data/ 目录")
     print()
     
-    selector = HighDividendLowVolatilitySelector(top_n=30)
+    selector = HighDividendLowVolatilitySelector(top_n=100)
     result = selector.run()
     
     print("\n筛选完成！请查看 data/ 目录中的结果文件。")
@@ -25,7 +25,7 @@ def run_with_custom_settings() -> None:
     
     # 获取用户输入
     try:
-        top_n = int(input("\n请输入要选取的股票数量 [默认30]: ") or "30")
+        top_n = int(input("\n请输入要选取的股票数量 [默认100]: ") or "100")
         output_dir = input("请输入输出目录路径 [默认./data]: ") or "./data"
         
         print(f"\n配置:")

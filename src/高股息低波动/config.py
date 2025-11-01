@@ -46,7 +46,7 @@ class DataConfig:
 class OutputConfig:
     """输出配置."""
 
-    top_n: int = 30  # 最终选取股票数量
+    top_n: int = 100  # 最终选取股票数量
     save_intermediate_results: bool = True  # 是否保存中间结果
 
 

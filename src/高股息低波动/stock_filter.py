@@ -199,7 +199,17 @@ class StockFilter:
         volatility_df: pd.DataFrame,
     ) -> pd.DataFrame:
         """
-        应用所有6条硬门槛筛选.
+        应用硬门槛筛选（前4条），其余作为属性添加.
+        
+        筛选条件（会过滤）：
+        ① 连续分红年限 ≥ 3年
+        ② 股息率 ≥ 4%
+        ③ 股息支付率 30%-70%
+        ④ 扣非ROE ≥ 8%
+        
+        属性添加（不过滤）：
+        ⑤ 资产负债率（作为属性）
+        ⑥ 波动率（作为属性）
 
         Args:
             dividend_df: 分红数据DataFrame
@@ -208,10 +218,10 @@ class StockFilter:
             volatility_df: 波动率DataFrame
 
         Returns:
-            pd.DataFrame: 通过所有筛选的股票DataFrame
+            pd.DataFrame: 通过前4条筛选的股票DataFrame（包含所有属性）
         """
         print("\n" + "=" * 60)
-        print("开始应用6条硬门槛筛选")
+        print("开始应用硬门槛筛选（前4条）+ 属性添加（后2条）")
         print("=" * 60)
         
         # 合并所有数据
@@ -223,16 +233,16 @@ class StockFilter:
         
         print(f"合并后总数: {len(df)} 只")
         
-        # 依次应用6条筛选
+        # 依次应用前4条筛选
         df = self.filter_dividend_years(df)
         df = self.filter_dividend_yield(df)
         df = self.filter_payout_ratio(df)
         df = self.filter_roe(df)
-        df = self.filter_debt_ratio_by_industry(df)
-        df = self.filter_volatility(df)
         
+        # 资产负债率和波动率作为属性保留，不进行筛选
         print("\n" + "=" * 60)
-        print(f"筛选完成！最终通过: {len(df)} 只股票")
+        print(f"筛选完成！通过前4条筛选: {len(df)} 只股票")
+        print("资产负债率和波动率已作为属性添加到结果中")
         print("=" * 60)
         
         return df
