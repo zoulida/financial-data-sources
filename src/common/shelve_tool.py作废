@@ -1,0 +1,301 @@
+"""Shelve缓存工具模块 - 用于缓存数据获取结果."""
+
+import shelve
+import os
+from pathlib import Path
+from datetime import datetime
+from functools import wraps
+from typing import Any, Callable
+
+
+# 配置shelve存储路径
+SHELVE_DIR = Path(__file__).resolve().parents[2] / "cache"
+SHELVE_DIR.mkdir(parents=True, exist_ok=True)
+SHELVE_PATH = str(SHELVE_DIR / "shelve")
+
+
+def get_cache_key(func_name: str, args: tuple, kwargs: dict, time_suffix: str = "") -> str:
+    """
+    生成缓存键.
+
+    Args:
+        func_name: 函数名
+        args: 位置参数
+        kwargs: 关键字参数
+        time_suffix: 时间后缀
+
+    Returns:
+        str: 缓存键
+    """
+    # 排除self参数（如果是类方法）
+    if args and hasattr(args[0], "__class__"):
+        args = args[1:]
+    
+    args_str = "_".join(str(arg) for arg in args)
+    kwargs_str = "_".join(f"{k}={v}" for k, v in sorted(kwargs.items()))
+    
+    parts = [func_name, args_str, kwargs_str, time_suffix]
+    key = "_".join(filter(None, parts))
+    
+    return key
+
+
+def save_shelve(key: str, content: Any) -> None:
+    """
+    保存数据到shelve.
+
+    Args:
+        key: 缓存键
+        content: 要缓存的内容
+    """
+    try:
+        with shelve.open(SHELVE_PATH) as db:
+            db[key] = content
+    except Exception as e:
+        print(f"警告: 保存缓存失败: {e}")
+
+
+def get_shelve(key: str) -> Any:
+    """
+    从shelve获取数据.
+
+    Args:
+        key: 缓存键
+
+    Returns:
+        Any: 缓存的内容，如果不存在返回None
+    """
+    try:
+        with shelve.open(SHELVE_PATH) as db:
+            return db.get(key)
+    except Exception as e:
+        print(f"警告: 读取缓存失败: {e}")
+        return None
+
+
+def shelve_me(func: Callable) -> Callable:
+    """
+    永久缓存装饰器.
+
+    Args:
+        func: 要缓存的函数
+
+    Returns:
+        Callable: 包装后的函数
+    """
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        key = get_cache_key(func.__name__, args, kwargs)
+        
+        # 尝试从缓存获取
+        cached = get_shelve(key)
+        if cached is not None:
+            print(f"✓ 使用缓存数据: {func.__name__}")
+            return cached
+        
+        # 执行函数并缓存结果
+        print(f"○ 计算新数据: {func.__name__}")
+        try:
+            result = func(*args, **kwargs)
+            save_shelve(key, result)
+            return result
+        except Exception as e:
+            print(f"✗ 函数执行失败，不缓存: {e}")
+            raise
+    
+    return wrapper
+
+
+def shelve_me_hour(func: Callable) -> Callable:
+    """
+    按小时缓存装饰器（缓存1小时）.
+
+    Args:
+        func: 要缓存的函数
+
+    Returns:
+        Callable: 包装后的函数
+    """
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        time_suffix = datetime.now().strftime("%Y%m%d_%H")
+        key = get_cache_key(func.__name__, args, kwargs, time_suffix)
+        
+        cached = get_shelve(key)
+        if cached is not None:
+            print(f"✓ 使用缓存数据(hour): {func.__name__}")
+            return cached
+        
+        print(f"○ 计算新数据(hour): {func.__name__}")
+        try:
+            result = func(*args, **kwargs)
+            save_shelve(key, result)
+            return result
+        except Exception as e:
+            print(f"✗ 函数执行失败，不缓存: {e}")
+            raise
+    
+    return wrapper
+
+
+def shelve_me_today(func: Callable) -> Callable:
+    """
+    按天缓存装饰器（缓存1天）.
+
+    Args:
+        func: 要缓存的函数
+
+    Returns:
+        Callable: 包装后的函数
+    """
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        time_suffix = datetime.now().strftime("%Y%m%d")
+        key = get_cache_key(func.__name__, args, kwargs, time_suffix)
+        
+        cached = get_shelve(key)
+        if cached is not None:
+            print(f"✓ 使用缓存数据(today): {func.__name__}")
+            return cached
+        
+        print(f"○ 计算新数据(today): {func.__name__}")
+        try:
+            result = func(*args, **kwargs)
+            save_shelve(key, result)
+            return result
+        except Exception as e:
+            print(f"✗ 函数执行失败，不缓存: {e}")
+            raise
+    
+    return wrapper
+
+
+def shelve_me_week(func: Callable) -> Callable:
+    """
+    按周缓存装饰器（缓存1周）.
+
+    Args:
+        func: 要缓存的函数
+
+    Returns:
+        Callable: 包装后的函数
+    """
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        # 使用ISO周号作为缓存键
+        year, week, _ = datetime.now().isocalendar()
+        time_suffix = f"{year}_W{week:02d}"
+        key = get_cache_key(func.__name__, args, kwargs, time_suffix)
+        
+        cached = get_shelve(key)
+        if cached is not None:
+            print(f"✓ 使用缓存数据(week): {func.__name__}")
+            return cached
+        
+        print(f"○ 计算新数据(week): {func.__name__}")
+        try:
+            result = func(*args, **kwargs)
+            save_shelve(key, result)
+            return result
+        except Exception as e:
+            print(f"✗ 函数执行失败，不缓存: {e}")
+            raise
+    
+    return wrapper
+
+
+def clear_cache() -> None:
+    """清空所有缓存."""
+    try:
+        # 删除shelve文件
+        for ext in [".bak", ".dat", ".dir"]:
+            cache_file = Path(str(SHELVE_PATH) + ext)
+            if cache_file.exists():
+                cache_file.unlink()
+        print("✓ 缓存已清空")
+    except Exception as e:
+        print(f"✗ 清空缓存失败: {e}")
+
+
+def list_cache_keys() -> list[str]:
+    """
+    列出所有缓存键.
+
+    Returns:
+        list[str]: 缓存键列表
+    """
+    try:
+        with shelve.open(SHELVE_PATH) as db:
+            return list(db.keys())
+    except Exception as e:
+        print(f"✗ 读取缓存键失败: {e}")
+        return []
+
+
+def get_cache_info() -> dict:
+    """
+    获取缓存信息.
+
+    Returns:
+        dict: 缓存信息字典
+    """
+    try:
+        keys = list_cache_keys()
+        cache_files = list(SHELVE_DIR.glob("shelve.*"))
+        total_size = sum(f.stat().st_size for f in cache_files if f.is_file())
+        
+        return {
+            "cache_dir": str(SHELVE_DIR),
+            "total_keys": len(keys),
+            "total_size_mb": total_size / (1024 * 1024),
+            "cache_files": [f.name for f in cache_files],
+        }
+    except Exception as e:
+        print(f"✗ 获取缓存信息失败: {e}")
+        return {}
+
+
+def main() -> None:
+    """测试缓存功能."""
+    print("=" * 80)
+    print("Shelve缓存工具测试")
+    print("=" * 80)
+    
+    # 测试永久缓存
+    @shelve_me
+    def test_permanent(x: int) -> int:
+        print(f"计算 {x} * 2")
+        return x * 2
+    
+    print("\n测试1: 永久缓存")
+    result1 = test_permanent(5)
+    print(f"结果: {result1}")
+    result2 = test_permanent(5)  # 应该使用缓存
+    print(f"结果: {result2}")
+    
+    # 测试按天缓存
+    @shelve_me_today
+    def test_daily(name: str) -> str:
+        print(f"处理 {name}")
+        return f"Hello, {name}!"
+    
+    print("\n测试2: 按天缓存")
+    result3 = test_daily("Alice")
+    print(f"结果: {result3}")
+    result4 = test_daily("Alice")  # 应该使用缓存
+    print(f"结果: {result4}")
+    
+    # 显示缓存信息
+    print("\n缓存信息:")
+    info = get_cache_info()
+    for key, value in info.items():
+        print(f"  {key}: {value}")
+    
+    print("\n所有缓存键:")
+    for key in list_cache_keys():
+        print(f"  - {key}")
+
+
+if __name__ == "__main__":
+    main()
+

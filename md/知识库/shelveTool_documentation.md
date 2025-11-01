@@ -3,6 +3,8 @@
 ## 概述
 
 `shelveTool.py` 是一个功能全面的 Python 模块，使用 Python 内置的 `shelve` 模块提供缓存功能。它提供各种装饰器和实用函数，可以以不同的过期时间（小时、天、周或永久）缓存函数结果。
+pythonpath:D:\pythonworkspace\zldtools
+引用路径：from tools.shelveTool import shelve_me_week
 
 ## 功能特性
 
