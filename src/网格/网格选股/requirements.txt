@@ -1,0 +1,22 @@
+# 网格选股综合评分系统依赖包
+# 使用方法: pip install -r requirements.txt
+
+# 核心数据处理
+pandas>=1.5.0
+numpy>=1.23.0
+
+# 统计分析
+statsmodels>=0.13.0
+scipy>=1.9.0
+
+# 进度条显示
+tqdm>=4.64.0
+
+# 数据源接口
+xtquant>=1.0.0
+WindPy>=3.0.0
+
+# 其他依赖（通常会自动安装）
+python-dateutil>=2.8.0
+pytz>=2022.1
+
