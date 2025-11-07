@@ -81,10 +81,26 @@ class A股情绪评分计算器:
         """
         self.logger.info("开始计算成交量得分")
         
+        if 成交额数据 is None or 成交额数据.empty:
+            self.logger.warning("成交额数据为空，无法计算成交量得分")
+            return pd.DataFrame()
+        
+        if '成交额_万元' not in 成交额数据.columns:
+            self.logger.warning("成交额数据中缺少'成交额_万元'字段")
+            return pd.DataFrame()
+        
         结果数据 = 成交额数据.copy()
         
-        # 计算250日滚动分位数
-        结果数据['成交量_250日分位'] = 结果数据['成交额_万元'].rolling(250, min_periods=50).rank(pct=True)
+        # 检查数据量，如果数据不足250天，使用全部数据计算分位数
+        数据天数 = len(结果数据)
+        if 数据天数 < 50:
+            self.logger.warning(f"成交量数据只有 {数据天数} 天，不足50天，使用全部数据计算分位数")
+            min_periods = max(1, 数据天数 // 2)  # 至少需要一半的数据
+        else:
+            min_periods = 50
+        
+        # 计算滚动分位数（使用全部可用数据）
+        结果数据['成交量_250日分位'] = 结果数据['成交额_万元'].rolling(window=min(250, 数据天数), min_periods=min_periods).rank(pct=True)
         
         # 根据分位数计算得分
         def 成交量得分函数(分位值):
@@ -100,7 +116,15 @@ class A股情绪评分计算器:
         
         结果数据['成交量得分'] = 结果数据['成交量_250日分位'].apply(成交量得分函数)
         
-        self.logger.info(f"成交量得分计算完成，平均得分: {结果数据['成交量得分'].mean():.2f}")
+        # 检查是否有有效得分
+        有效得分 = 结果数据['成交量得分'].dropna()
+        if len(有效得分) == 0:
+            self.logger.warning("成交量得分全部为NaN，可能数据不足")
+            # 如果全部为NaN，给一个默认分数
+            结果数据['成交量得分'] = 50.0
+        else:
+            self.logger.info(f"成交量得分计算完成，有效得分 {len(有效得分)} 天，平均得分: {有效得分.mean():.2f}")
+        
         return 结果数据[['成交量得分']]
     
     def 计算涨跌停得分(self, 涨跌停数据: pd.DataFrame) -> pd.DataFrame:
@@ -157,10 +181,26 @@ class A股情绪评分计算器:
         """
         self.logger.info("开始计算波动率得分")
         
+        if 波动率数据 is None or 波动率数据.empty:
+            self.logger.warning("波动率数据为空，无法计算波动率得分")
+            return pd.DataFrame()
+        
+        if '波动率' not in 波动率数据.columns:
+            self.logger.warning("波动率数据中缺少'波动率'字段")
+            return pd.DataFrame()
+        
         结果数据 = 波动率数据.copy()
         
-        # 计算250日滚动分位数
-        结果数据['波动率_250日分位'] = 结果数据['波动率'].rolling(250, min_periods=50).rank(pct=True)
+        # 检查数据量，如果数据不足250天，使用全部数据计算分位数
+        数据天数 = len(结果数据)
+        if 数据天数 < 50:
+            self.logger.warning(f"波动率数据只有 {数据天数} 天，不足50天，使用全部数据计算分位数")
+            min_periods = max(1, 数据天数 // 2)  # 至少需要一半的数据
+        else:
+            min_periods = 50
+        
+        # 计算滚动分位数（使用全部可用数据）
+        结果数据['波动率_250日分位'] = 结果数据['波动率'].rolling(window=min(250, 数据天数), min_periods=min_periods).rank(pct=True)
         
         # 根据分位数计算得分（注意：高波动得低分，低波动得高分）
         def 波动率得分函数(分位值):
@@ -176,7 +216,15 @@ class A股情绪评分计算器:
         
         结果数据['波动率得分'] = 结果数据['波动率_250日分位'].apply(波动率得分函数)
         
-        self.logger.info(f"波动率得分计算完成，平均得分: {结果数据['波动率得分'].mean():.2f}")
+        # 检查是否有有效得分
+        有效得分 = 结果数据['波动率得分'].dropna()
+        if len(有效得分) == 0:
+            self.logger.warning("波动率得分全部为NaN，可能数据不足")
+            # 如果全部为NaN，给一个默认分数
+            结果数据['波动率得分'] = 50.0
+        else:
+            self.logger.info(f"波动率得分计算完成，有效得分 {len(有效得分)} 天，平均得分: {有效得分.mean():.2f}")
+        
         return 结果数据[['波动率得分']]
     
     def 计算北向资金得分(self, 北向资金数据: pd.DataFrame) -> pd.DataFrame:
@@ -304,6 +352,10 @@ class A股情绪评分计算器:
         """
         self.logger.info("开始计算融资余额得分")
         
+        if 融资余额数据 is None or 融资余额数据.empty:
+            self.logger.warning("融资余额数据为空，无法计算融资余额得分")
+            return pd.DataFrame()
+        
         结果数据 = 融资余额数据.copy()
         
         # 检查字段名并计算250日滚动分位数
@@ -322,7 +374,16 @@ class A股情绪评分计算器:
             结果数据['融资余额_万元'] = 结果数据[融资余额字段] / 10000
             融资余额字段 = '融资余额_万元'
         
-        结果数据['融资余额_250日分位'] = 结果数据[融资余额字段].rolling(250, min_periods=50).rank(pct=True)
+        # 检查数据量，如果数据不足250天，使用全部数据计算分位数
+        数据天数 = len(结果数据)
+        if 数据天数 < 50:
+            self.logger.warning(f"融资余额数据只有 {数据天数} 天，不足50天，使用全部数据计算分位数")
+            min_periods = max(1, 数据天数 // 2)  # 至少需要一半的数据
+        else:
+            min_periods = 50
+        
+        # 计算滚动分位数（使用全部可用数据）
+        结果数据['融资余额_250日分位'] = 结果数据[融资余额字段].rolling(window=min(250, 数据天数), min_periods=min_periods).rank(pct=True)
         
         # 根据分位数计算得分
         def 融资余额得分函数(分位值):
@@ -338,7 +399,15 @@ class A股情绪评分计算器:
         
         结果数据['融资余额得分'] = 结果数据['融资余额_250日分位'].apply(融资余额得分函数)
         
-        self.logger.info(f"融资余额得分计算完成，平均得分: {结果数据['融资余额得分'].mean():.2f}")
+        # 检查是否有有效得分
+        有效得分 = 结果数据['融资余额得分'].dropna()
+        if len(有效得分) == 0:
+            self.logger.warning("融资余额得分全部为NaN，可能数据不足")
+            # 如果全部为NaN，给一个默认分数
+            结果数据['融资余额得分'] = 50.0
+        else:
+            self.logger.info(f"融资余额得分计算完成，有效得分 {len(有效得分)} 天，平均得分: {有效得分.mean():.2f}")
+        
         return 结果数据[['融资余额得分']]
     
     def 计算综合得分(self, 所有数据: Dict[str, pd.DataFrame]) -> pd.DataFrame:
