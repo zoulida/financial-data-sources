@@ -133,6 +133,63 @@ def fetch_quotes_basic(
     return df.loc[:, available_cols].copy()
 
 
+def fetch_quotes_basic_auto_switch(
+    stock_codes: Sequence[str],
+) -> pd.DataFrame:
+    """
+    获取快照行情并裁剪为常用核心字段，支持自动切换IP。
+    
+    此函数只接受 stock_codes 参数，其他参数使用模块默认值。
+    如果获取失败，会自动调用 get_fastest_ip 切换 IP 并重试。
+    
+    Args:
+        stock_codes: 股票代码列表
+    
+    Returns:
+        pd.DataFrame: 包含行情数据的 DataFrame
+    
+    Raises:
+        RuntimeError: 如果获取数据失败且无法切换IP
+    """
+    if get_fastest_ip is None:
+        # 如果无法导入 get_fastest_ip，回退到原始函数
+        return fetch_quotes_basic(stock_codes)
+    
+    # 使用默认 IP 地址
+    current_host = TDX_DEFAULT_HOST
+    current_port = TDX_DEFAULT_PORT
+    max_retries = 2  # 最多重试2次（包括初始尝试和切换IP后的重试）
+    
+    for attempt in range(max_retries):
+        try:
+            return fetch_quotes_basic(
+                stock_codes, host=current_host, port=current_port
+            )
+        except Exception as exc:  # noqa: BLE001
+            if attempt < max_retries - 1:
+                # 尝试切换IP
+                try:
+                    fastest_ip = get_fastest_ip(
+                        sample_size=10, enable_logging=True
+                    )
+                    current_host, current_port = fastest_ip
+                    print(
+                        f"[{time.strftime('%H:%M:%S')}] 切换到新IP: {current_host}:{current_port}",
+                        file=sys.stderr,
+                    )
+                except Exception as switch_exc:  # noqa: BLE001
+                    # 切换IP失败，抛出原始异常
+                    raise RuntimeError(
+                        f"获取数据失败: {exc}，且切换IP也失败: {switch_exc}"
+                    ) from exc
+            else:
+                # 最后一次尝试也失败了
+                raise RuntimeError(f"获取数据失败，已尝试切换IP: {exc}") from exc
+    
+    # 理论上不会到达这里
+    raise RuntimeError("获取数据失败")
+
+
 def fetch_quotes_per_second(
     stock_codes: Sequence[str],
     *,
@@ -186,18 +243,17 @@ def fetch_quotes_per_second(
         print(f"\n[{time.strftime('%H:%M:%S')}] 已停止监控", file=sys.stderr)
 
 
-def fetch_quotes_per_second_auto_switch(
+def fetch_quotes_per_second_callback(
     stock_codes: Sequence[str],
     *,
     callback: Callable[[pd.DataFrame], None] | None = None,
     max_iterations: int | None = None,
 ) -> None:
     """
-    每秒调用一次 fetch_quotes_basic，持续获取行情数据。
-    如果获取失败，自动调用 get_fastest_ip 切换 IP 并重试。
+    每秒调用一次 fetch_quotes_basic_auto_switch，持续获取行情数据。
+    如果获取失败，会自动切换 IP 并重试（由 fetch_quotes_basic_auto_switch 内部处理）。
     
     此函数只接受 stock_codes 参数，其他参数使用模块默认值。
-    当连接失败时，会自动从 IP 池中选择最快的 IP 并切换。
     
     Args:
         stock_codes: 股票代码列表
@@ -211,26 +267,7 @@ def fetch_quotes_per_second_auto_switch(
         >>> # 只调用10次
         >>> fetch_quotes_per_second_auto_switch(["600519.SH"], max_iterations=10)
     """
-    if get_fastest_ip is None:
-        # 如果无法导入 get_fastest_ip，回退到原始函数
-        print(
-            "[WARNING] 无法导入 get_fastest_ip，使用默认 IP 地址",
-            file=sys.stderr,
-        )
-        return fetch_quotes_per_second(
-            stock_codes,
-            host=TDX_DEFAULT_HOST,
-            port=TDX_DEFAULT_PORT,
-            callback=callback,
-            max_iterations=max_iterations,
-        )
-    
-    # 使用默认 IP 地址
-    current_host = TDX_DEFAULT_HOST
-    current_port = TDX_DEFAULT_PORT
     iteration = 0
-    consecutive_failures = 0
-    max_consecutive_failures = 3  # 连续失败3次后切换IP
     
     try:
         while True:
@@ -238,12 +275,8 @@ def fetch_quotes_per_second_auto_switch(
                 break
                 
             try:
-                df = fetch_quotes_basic(
-                    stock_codes, host=current_host, port=current_port
-                )
-                
-                # 成功获取数据，重置失败计数
-                consecutive_failures = 0
+                # 使用自动切换IP的函数获取数据
+                df = fetch_quotes_basic_auto_switch(stock_codes)
                 
                 if callback:
                     callback(df)
@@ -255,37 +288,13 @@ def fetch_quotes_per_second_auto_switch(
                     print(df)
                     
             except Exception as exc:  # noqa: BLE001
-                consecutive_failures += 1
                 print(
-                    f"[{time.strftime('%H:%M:%S')}] 获取数据失败 (连续失败 {consecutive_failures} 次): {exc}",
+                    f"[{time.strftime('%H:%M:%S')}] 获取数据失败: {exc}",
                     file=sys.stderr,
                 )
-                
-                # 如果连续失败达到阈值，尝试切换IP
-                if consecutive_failures >= max_consecutive_failures:
-                    try:
-                        print(
-                            f"[{time.strftime('%H:%M:%S')}] 尝试切换到最快的IP地址...",
-                            file=sys.stderr,
-                        )
-                        new_host, new_port = get_fastest_ip(
-                            sample_size=10, enable_logging=True
-                        )
-                        current_host = new_host
-                        current_port = new_port
-                        consecutive_failures = 0  # 重置失败计数
-                        print(
-                            f"[{time.strftime('%H:%M:%S')}] 已切换到新IP: {current_host}:{current_port}",
-                            file=sys.stderr,
-                        )
-                    except Exception as switch_exc:  # noqa: BLE001
-                        print(
-                            f"[{time.strftime('%H:%M:%S')}] 切换IP失败: {switch_exc}",
-                            file=sys.stderr,
-                        )
             
             iteration += 1
-            time.sleep(1)
+            time.sleep(2)
             
     except KeyboardInterrupt:
         print(f"\n[{time.strftime('%H:%M:%S')}] 已停止监控", file=sys.stderr)
@@ -363,10 +372,8 @@ class QuoteSubscriber:
         """推送循环，在后台线程中运行。"""
         while self._running:
             try:
-                # 获取数据
-                df = fetch_quotes_basic(
-                    self.stock_codes, host=self.host, port=self.port
-                )
+                # 获取数据（使用自动切换IP的函数）
+                df = fetch_quotes_basic_auto_switch(self.stock_codes)
 
                 # 复制订阅者列表，避免在回调时修改列表导致问题
                 with self._lock:
@@ -418,7 +425,7 @@ def main(argv: Iterable[str] | None = None) -> int:
     codes = args.codes or ["600519.SH"]
 
     try:
-        df = fetch_quotes_per_second(codes, host=args.host, port=args.port)
+        df = fetch_quotes_per_second_callback(codes)
     except Exception as exc:  # noqa: BLE001
         print(f"错误：{exc}", file=sys.stderr)
         return 1
