@@ -5,14 +5,13 @@
 功能：
 - 批量获取1800+只基金的后复权日线数据
 - 计算VolScore（历史波动率、波动稳定性、近期波动衰减）
-- 计算HLScore（基于FPT首次回归时间的概率分布）
+- 计算HLScore（基于OLS回归的半衰期）
 - 异步协程加速、进度条显示、异常捕获
 
 依赖：pip install pandas numpy statsmodels tqdm xtquant scipy
 
 作者：AI Assistant
 创建时间：2025-11-02
-更新：2025-01-XX - 将HLScore计算方法改为FPT（First Passage Time）打分法
 """
 
 import sys
@@ -222,215 +221,120 @@ class GridStockScorer:
         except Exception as e:
             return 0, 0
     
-    def first_return_date(self, df, k=5, buffer=0.2):
+    def calculate_hl_score(self, df):
         """
-        计算首次回归日期（向前看k日）
+        计算HLScore（0-100分）
+        
+        基于OLS离散回归计算半衰期，滚动63天计算HL序列
         
         Args:
-            df: 包含 date, close, high, low, EMA20, x 的数据框
-            k: 向前看的交易日数，默认5日
-            buffer: 缓冲系数，默认0.2
+            df: 包含 close 的数据框
             
         Returns:
-            pd.Series: 每行的首次回归日期 t（1到k+1）
-        """
-        df = df.copy()
-        t_values = np.full(len(df), np.nan)
-        
-        for i in range(len(df)):
-            center = df.iloc[i]['EMA20']
-            x_val = df.iloc[i]['x']
-            
-            # 处理 x 为 0 的情况
-            if x_val == 0:
-                t_values[i] = 1  # 已经在中心，视为立即回归
-                continue
-            
-            side = np.sign(x_val)  # 偏离方向：1为正偏离，-1为负偏离
-            
-            # 使用波动率动态调整回归线
-            # 如果当前行有波动率数据，使用波动率；否则使用固定比例
-            if 'σ' in df.columns and not pd.isna(df.iloc[i]['σ']):
-                sigma = df.iloc[i]['σ']
-                # 回归线 = 中心 ± (buffer * 波动率 * 0.5)
-                # buffer=0.1 时，回归线非常接近中心（偏离约1-2%）
-                # 虽然回归线很近，但由于价格波动特性，反而不会轻易在1天内回归
-                # 原因：回归线太近时，价格可能已经超过回归线或处于回归线附近，
-                #       导致"回归"的判断条件（low <= line 或 high >= line）不容易满足
-                #       因此需要更长时间才能真正"回归"到回归线
-                # buffer=2.0, sigma=0.2 → 偏离 = 2.0 * 0.2 * 0.5 = 0.2 (20%)
-                # buffer=2.0, sigma=0.4 → 偏离 = 2.0 * 0.4 * 0.5 = 0.4 (40%)
-                # 限制最大偏离为 50%，避免过大
-                deviation = min(buffer * sigma * 0.5, 0.5)
-                line = center * (1 + side * deviation)
-            else:
-                # 回退到固定比例（兼容旧逻辑）
-                # buffer=0.1 时，回归线偏离中心 = 0.1 * 0.2 = 2%
-                # 回归线太近，价格波动特性导致不会轻易在1天内回归
-                # 原因：回归线太近时，价格可能已经超过回归线或处于回归线附近，
-                #       导致"回归"的判断条件不容易满足，需要更长时间才能真正回归
-                line = center * (1 + side * buffer * 0.2)
-            
-            # 向后扫k日
-            for j in range(1, k + 1):
-                if i + j >= len(df):
-                    break
-                
-                # 正偏离：看是否跌破回归线（low <= line）
-                # 负偏离：看是否涨破回归线（high >= line）
-                if side > 0:
-                    if df.iloc[i + j]['low'] <= line:
-                        t_values[i] = j
-                        break
-                else:
-                    if df.iloc[i + j]['high'] >= line:
-                        t_values[i] = j
-                        break
-            
-            # 如果k日内未回归，设为k+1（截尾）
-            if pd.isna(t_values[i]):
-                t_values[i] = k + 1
-        
-        return pd.Series(t_values, index=df.index)
-    
-    def calculate_hl_score(self, df, k=5, buffer=2.0, min_samples=10):
-        """
-        计算HLScore（0-100分）- FPT（First Passage Time）打分法
-        
-        核心思想：基于历史首次回归时间的概率分布，预测当前价格回归的概率
-        
-        Args:
-            df: 包含 date, close, high, low 的数据框（按date升序）
-            k: 向前看的交易日数，默认5日
-            buffer: 缓冲系数，默认2.0（回归线偏离中心 = buffer * 0.2 = 40%）
-            min_samples: 分布表最小样本数，默认10
-            
-        Returns:
-            tuple: (hl_score, current_score)
-                - hl_score: 0-100分的评分
-                - current_score: 原始Score值（用于跨品种分位）
+            tuple: (hl_score, current_hl)
         """
         try:
-            # 确保数据按日期升序排列
-            if 'date' in df.columns:
-                df = df.sort_values('date').reset_index(drop=True)
-            
-            # 确保有足够的数据（至少需要20+天来计算EMA20，还需要k天向前看）
-            if len(df) < 20 + k:
-                return 0, 0
-            
             close = df['close'].values
-            high = df['high'].values
-            low = df['low'].values
             
-            # 1. 数据准备
-            # a) 计算EMA20（指数移动平均）
-            df_calc = df.copy()
-            df_calc['EMA20'] = df_calc['close'].ewm(span=20, adjust=False).mean()
-            
-            # b) 计算偏离百分比 x = (close - EMA20) / EMA20
-            df_calc['x'] = (df_calc['close'] - df_calc['EMA20']) / df_calc['EMA20']
-            
-            # c) 计算20日波动率 σ = std(ln(close/close.shift(1)), 20) * sqrt(252)
-            returns = np.log(df_calc['close'] / df_calc['close'].shift(1))
-            df_calc['σ'] = returns.rolling(window=20).std() * np.sqrt(252)
-            
-            # 删除前20行（EMA20和σ需要20天数据）
-            df_calc = df_calc.iloc[20:].reset_index(drop=True)
-            
-            # 放宽数据要求：至少需要 k 天向前看 + 一些数据来建立分布表
-            if len(df_calc) < k + 5:  # 至少需要 k+5 天数据
+            # 确保有足够的数据（至少252个交易日）
+            if len(close) < 252:
                 return 0, 0
             
-            # 2. 计算首次回归日期 t（向前看k日）
-            df_calc['t'] = self.first_return_date(df_calc, k=k, buffer=buffer)
+            # 取最近252个交易日
+            close_252 = close[-252:]
             
-            # 删除最后k行（无法向前看k日）
-            df_calc = df_calc.iloc[:-k].reset_index(drop=True)
+            # 对数价格序列
+            log_prices = np.log(close_252)
             
-            # 放宽数据要求：至少需要一些数据来建立分布表
-            if len(df_calc) < 5:  # 至少需要5个数据点
+            # 计算HL函数
+            def calculate_hl_single(log_prices):
+                """计算单次HL值"""
+                try:
+                    # 构造回归数据
+                    y_t = log_prices[1:]
+                    y_t_1 = log_prices[:-1]
+                    delta_y = y_t - y_t_1
+                    
+                    # OLS回归: Δy_t = α + β·y_{t-1} + ε_t
+                    X = sm.add_constant(y_t_1)
+                    model = sm.OLS(delta_y, X)
+                    results = model.fit()
+                    beta = results.params[1]
+                    
+                    # 计算半衰期
+                    if beta < 0:
+                        theta = -np.log(1 + beta)
+                        hl = np.log(2) / theta
+                        return hl
+                    else:
+                        # β≥0，说明不均值回归，返回无穷大（给0分）
+                        return np.inf
+                
+                except:
+                    return np.inf
+            
+            # 滚动63天计算HL序列
+            hl_list = []
+            window = 63
+            
+            for i in range(window, len(log_prices) + 1):
+                window_data = log_prices[i-window:i]
+                hl_val = calculate_hl_single(window_data)
+                hl_list.append(hl_val)
+            
+            # 当前HL值（最后一个）
+            current_hl = hl_list[-1] if hl_list else np.inf
+            
+            # 过滤掉无穷大的值
+            hl_history = [x for x in hl_list if x != np.inf]
+            
+            if not hl_history or current_hl == np.inf:
                 return 0, 0
-            
-            # 3. 建立整体分布表（不分组，使用所有数据）
-            # 过滤掉无效值
-            df_calc = df_calc.dropna(subset=['t', 'EMA20', 'x', 'σ'])
-            
-            if len(df_calc) < 5:  # 至少需要5个有效数据点
-                return 0, 0
-            
-            # 直接使用所有数据计算整体概率（不分组）
-            # 这样样本充足，分布更稳定，所有标的使用同一个概率分布
-            P1 = (df_calc['t'] == 1).mean()
-            P2 = (df_calc['t'] <= 2).mean()
-            P3 = (df_calc['t'] <= 3).mean()
-            P4 = (df_calc['t'] <= 4).mean()
-            P5 = (df_calc['t'] <= 5).mean()
-            
-            # 4. 计算当前行的Score（直接使用整体概率）
-            # 不需要查找分布表，所有标的使用同一个概率分布
-            
-            # 时间折扣系数
-            lam = 0.65
-            coef = np.array([
-                1 - lam,
-                lam - lam**2,
-                lam**2 - lam**3,
-                lam**3 - lam**4,
-                lam**4
-            ])
-            
-            # 计算Score
-            S = (P1 * coef[0] + 
-                 (P2 - P1) * coef[1] + 
-                 (P3 - P2) * coef[2] + 
-                 (P4 - P3) * coef[3] + 
-                 (P5 - P4) * coef[4])
-            
-            # 转换为0-100分（coef[0]是最大权重，保证100分封顶）
-            hl_score = int(100 * S / coef[0])
-            hl_score = max(0, min(100, hl_score))
             
             # 存储到全局列表（用于跨品种分位计算）
-            self.all_hl_values.append(S)
+            self.all_hl_values.append(current_hl)
             
-            return round(hl_score, 2), round(S, 4)
+            # 计算自身历史分位
+            hl_history_array = np.array(hl_history)
+            self_percentile = 1 - (np.sum(hl_history_array <= current_hl) / len(hl_history_array))
+            
+            # 跨品种分位暂时设为0.5（需要在所有数据计算完后统一计算）
+            # 这里先返回自身分位的得分，后续会重新计算
+            hl_score = self_percentile * 100
+            
+            return round(hl_score, 2), round(current_hl, 2)
             
         except Exception as e:
             return 0, 0
     
     def calculate_cross_hl_score(self, hl_values_dict):
         """
-        重新计算所有标的的HLScore，加入跨品种分位（FPT方法）
+        重新计算所有标的的HLScore，加入跨品种分位
         
         Args:
-            hl_values_dict: {code: (self_percentile, current_score)}
-                - self_percentile: 自身分位（0-1）
-                - current_score: 原始Score值（FPT概率值）
+            hl_values_dict: {code: (self_percentile, current_hl)}
             
         Returns:
             dict: {code: hl_score}
         """
-        # 获取所有有效的Score值
-        all_scores = [v[1] for v in hl_values_dict.values() if v[1] > 0]
+        # 获取所有有效的HL值
+        all_hl = [v[1] for v in hl_values_dict.values() if v[1] > 0 and v[1] != np.inf]
         
-        if not all_scores:
+        if not all_hl:
             return {code: 0 for code in hl_values_dict.keys()}
         
-        all_scores_array = np.array(all_scores)
+        all_hl_array = np.array(all_hl)
         
         # 重新计算每个标的的分数
         new_scores = {}
-        for code, (self_pct, current_score) in hl_values_dict.items():
-            if current_score <= 0:
+        for code, (self_pct, current_hl) in hl_values_dict.items():
+            if current_hl <= 0 or current_hl == np.inf:
                 new_scores[code] = 0
             else:
-                # 跨品种分位：Score越大，分位越高（越极端，回归越快）
-                # 使用 1 - percentile 因为 Score 越大越好
-                cross_percentile = 1 - (np.sum(all_scores_array <= current_score) / len(all_scores_array))
+                # 跨品种分位
+                cross_percentile = 1 - (np.sum(all_hl_array <= current_hl) / len(all_hl_array))
                 
                 # Score = 0.6*self_pct + 0.4*cross_pct
-                # 对于经验分位法，也可以直接使用自身分位，这里保留跨品种加权
                 hl_score = 0.6 * self_pct * 100 + 0.4 * cross_percentile * 100
                 new_scores[code] = round(hl_score, 2)
         
@@ -457,28 +361,19 @@ class GridStockScorer:
             vol_score, hist30 = self.calculate_vol_score(df)
             
             # 计算HLScore（初步，不含跨品种分位）
-            # buffer=2.0 表示回归线偏离中心 40%（2.0 * 0.2），避免回归线太近导致P1=1
-            hl_score_temp, current_score = self.calculate_hl_score(df, buffer=0.1)
+            hl_score_temp, hl = self.calculate_hl_score(df)
             
-            # 只过滤掉基础数据无效的标的（hist30 == 0）
-            # 对于 current_score == 0 的标的，保留但给默认值，让排名系统处理
-            if hist30 == 0:
+            if hist30 == 0 or hl == 0:
                 return None
             
-            # 如果 FPT 方法无法计算（current_score == 0），给一个默认值
-            if current_score == 0:
-                current_score = 0.01  # 给一个很小的默认值，避免完全为0
-                hl_score_temp = 0  # hl_score 设为 0
-            
-            # 返回结果
+            # 返回结果（hl_score会在后续重新计算）
             return {
                 'code': code,
                 'name': name,
                 'hist30': hist30,
-                'hl': current_score,  # 保存原始Score值（S值，用于内部计算，不输出到最终结果）
+                'hl': hl,
                 'vol_score': vol_score,
-                'hl_score_original': hl_score_temp,  # 初始的 hl_score（S 转换后的 0-100 分，未排名）
-                'hl_score': hl_score_temp,  # 临时值，后续会被排名后的值覆盖
+                'hl_score': hl_score_temp,  # 临时值
                 'hl_self_pct': hl_score_temp / 100,  # 保存自身分位用于后续计算
                 'total': 0  # 占位，后续计算
             }
@@ -529,7 +424,6 @@ class GridStockScorer:
     def finalize_scores(self, results):
         """
         最终化评分（重新计算HLScore并计算总分）
-        使用分位数排名重新映射 vol_score 和 hl_score，确保权重有效
         
         Args:
             results: 初步结果列表
@@ -537,41 +431,31 @@ class GridStockScorer:
         Returns:
             pd.DataFrame: 最终结果
         """
-        print("\n[3/5] 使用分位数排名重新映射分数...")
+        print("\n[3/5] 重新计算HLScore（加入跨品种分位）...")
         
-        # 转换为DataFrame便于处理
+        # 提取HL相关数据
+        hl_dict = {}
+        for r in results:
+            # 自身分位 = hl_self_pct
+            hl_dict[r['code']] = (r['hl_self_pct'], r['hl'])
+        
+        # 重新计算HLScore
+        new_hl_scores = self.calculate_cross_hl_score(hl_dict)
+        
+        # 更新结果
+        for r in results:
+            r['hl_score'] = new_hl_scores[r['code']]
+            # 计算总分：Total = 0.7*VolScore + 0.3*HLScore
+            r['total'] = round(0.7 * r['vol_score'] + 0.3 * r['hl_score'], 2)
+        
+        # 转换为DataFrame
         df = pd.DataFrame(results)
-        
-        # 使用分位数排名重新映射 vol_score 和 hl_score_original
-        # 这样可以确保权重有效，不受原始分数分布范围影响
-        
-        # 计算 vol_score 的分位数排名（0-100分）
-        # rank(pct=True) 返回分位数排名（0-1），乘以100得到0-100分
-        # 默认是升序排名，值越大排名越高（这是正确的）
-        df['vol_score_ranked'] = df['vol_score'].rank(pct=True, method='min') * 100
-        
-        # 对 hl_score_original 进行排名（初始的 hl_score，S 转换后的 0-100 分，未排名）
-        # hl_score_original 越大越好（回归概率越高），所以直接排名即可
-        # rank(pct=True) 默认升序，值越大排名越高
-        df['hl_score_ranked'] = df['hl_score_original'].rank(pct=True, method='min') * 100
-        
-        # 使用排名后的分数计算总分：Total = 0.7*VolScore_ranked + 0.3*HLScore_ranked
-        df['total_raw'] = 0.7 * df['vol_score_ranked'] + 0.3 * df['hl_score_ranked']
-        
-        # 对总分也进行分位数排名映射到 0-100
-        df['total'] = df['total_raw'].rank(pct=True, method='min') * 100
-        df['total'] = df['total'].round(2)
-        
-        # 更新显示值：保留原始分数和排名后的分数
-        df['vol_score'] = df['vol_score_ranked'].round(2)  # 显示排名后的 vol_score
-        df['hl_score'] = df['hl_score_ranked'].round(2)  # 显示排名后的 hl_score（用于计算 total）
-        df['hl_score_original'] = df['hl_score_original'].round(2)  # 保留初始的 hl_score（未排名）
         
         # 按总分降序排序
         df = df.sort_values('total', ascending=False).reset_index(drop=True)
         
-        # 选择需要的列（保留 hl_score_original 和 hl_score）
-        df = df[['code', 'name', 'hist30', 'hl', 'vol_score', 'hl_score_original', 'hl_score', 'total']]
+        # 选择需要的列
+        df = df[['code', 'name', 'hist30', 'hl', 'vol_score', 'hl_score', 'total']]
         
         return df
     

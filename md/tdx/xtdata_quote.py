@@ -130,7 +130,21 @@ def fetch_quotes_basic(
     if not available_cols:
         return df.iloc[:, 0:0].copy()
 
-    return df.loc[:, available_cols].copy()
+    df = df.loc[:, available_cols].copy()
+    
+    # 价格相关字段
+    price_cols = ['price', 'ask1', 'bid1', 'last_close', 'open', 'high', 'low']
+    price_cols = [col for col in price_cols if col in df.columns]
+    
+    # 如果代码是1或5开头，价格除以10
+    if price_cols:
+        for code in df.index:
+            # 提取纯数字代码（去除后缀如.SZ/.SH）
+            code_str = str(code).split('.')[0] if '.' in str(code) else str(code)
+            if code_str and (code_str.startswith('1') or code_str.startswith('5')):
+                df.loc[code, price_cols] = df.loc[code, price_cols] / 10
+    
+    return df
 
 
 def fetch_quotes_basic_auto_switch(
@@ -422,7 +436,7 @@ def main(argv: Iterable[str] | None = None) -> int:
 
     args = parser.parse_args(list(argv) if argv is not None else None)
 
-    codes = args.codes or ["600519.SH"]
+    codes = args.codes or ["159321.SZ"]
 
     try:
         df = fetch_quotes_per_second_callback(codes)
