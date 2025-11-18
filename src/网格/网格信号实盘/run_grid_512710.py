@@ -235,7 +235,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--debug",
-        default=True,
+        default = False,
         action=argparse.BooleanOptionalAction,
         help="开启调试模式：使用本地tick数据回放；使用 --no-debug 时改为实时行情",
     )

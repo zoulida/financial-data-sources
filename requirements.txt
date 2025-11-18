@@ -5,6 +5,10 @@ matplotlib>=3.5.0
 seaborn>=0.11.0
 # akshare>=1.12.0  # 不再使用
 xtquant>=1.0.0  # XtQuant 数据接口
+backtrader>=1.9.78  # Backtrader 策略回测框架
+vnpy>=4.2.0  # VeighNa量化交易平台
+vnpy-ctastrategy>=1.3.3  # vnpy CTA策略模块
+vnpy-sqlite>=1.0.0  # vnpy SQLite数据库驱动
 
 # Wind API (需要手动安装Wind终端)
 # WindPy>=1.0.0
