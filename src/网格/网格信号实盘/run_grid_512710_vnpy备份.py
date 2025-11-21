@@ -39,9 +39,6 @@ import sys
 import pandas as pd
 
 from xtquant import xtdata
-from xtquant.xttrader import XtQuantTrader, XtQuantTraderCallback
-from xtquant.xttype import StockAccount
-from xtquant import xtconstant
 from vnpy_ctastrategy import CtaTemplate, BarGenerator, ArrayManager
 from vnpy.trader.constant import Direction, Interval, Offset, Exchange
 from vnpy_ctastrategy import BarData, TickData, TradeData, OrderData
@@ -52,22 +49,18 @@ if __package__ in {None, ""}:
     root_str = str(project_root.parent)  # project root (contains src package)
     if root_str not in sys.path:
         sys.path.append(root_str)
-    # easy_qmt_trader: 需要在将项目根目录加入 sys.path 之后再导入
-    from md.xtdata.easy_qmt_trader示例.easy_qmt_trader import easy_qmt_trader
     from src.网格.网格信号实盘.grid_engine import GridEngine, GridSpec
-    from src.网格.网格信号实盘.order_sim import Trade
+    from src.网格.网格信号实盘.order_sim import OrderSimulator, Trade
     from src.网格.网格信号实盘.position_book import PositionBook
     from src.网格.网格信号实盘.reporter import Reporter
     # 导入模拟模式所需的函数
     from src.网格.网格信号实盘.run_grid_512710 import _load_tick_raw_dataframe, _prepare_tick_dataframe
 else:
     from .grid_engine import GridEngine, GridSpec
-    from .order_sim import Trade
+    from .order_sim import OrderSimulator, Trade
     from .position_book import PositionBook
     from .reporter import Reporter
     from .run_grid_512710 import _load_tick_raw_dataframe, _prepare_tick_dataframe
-    # 包导入场景：同样显式导入 easy_qmt_trader
-    from md.xtdata.easy_qmt_trader示例.easy_qmt_trader import easy_qmt_trader
 
 
 def get_exchange_from_code(stock_code: str) -> Exchange:
@@ -284,7 +277,7 @@ class GridStrategy(CtaTemplate):
     baseline: Optional[float] = None  # 若提供则直接使用该基准价；否则使用9:30开盘价
     
     parameters = ["step", "up_grids", "down_grids", "lot_per_grid", "hand_size", "baseline"]
-    variables = ["spec", "engine", "pos_book", "reporter", "initialized", "last_price"]
+    variables = ["spec", "engine", "pos_book", "ord_sim", "reporter", "initialized", "last_price"]
     
     def __init__(
         self,
@@ -299,6 +292,7 @@ class GridStrategy(CtaTemplate):
         self.spec: Optional[GridSpec] = None
         self.engine: Optional[GridEngine] = None
         self.pos_book = PositionBook()
+        self.ord_sim = OrderSimulator()
         
         # 报告器（需要从 setting 中获取 out_dir）
         out_dir = setting.get("out_dir", "data/grid")
@@ -308,9 +302,7 @@ class GridStrategy(CtaTemplate):
         self.initialized = False
         self.last_price: Optional[float] = None
         self._baseline_set = False
-        self._simulate_mode = setting.get("simulate_mode", False)
-        self._order_placer = None
-        self._pending_orders = set()  # (level_index, side)
+        self._simulate_mode = setting.get("simulate_mode", False)  # 是否处于模拟模式
         
     @property
     def qty_per_fill(self) -> int:
@@ -382,7 +374,7 @@ class GridStrategy(CtaTemplate):
         ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         
         # 1) 若该网格已经发出订单且没有成交，则等待下一个价格
-        if self._has_pending(level_index):
+        if self.ord_sim.has_order(level_index):
             self.write_log(f"层级 {level_index} 已有订单未成交，等待下一个价格")
             return
         
@@ -400,39 +392,58 @@ class GridStrategy(CtaTemplate):
             for idx in levels_with_pos:
                 pos = self.pos_book.get(idx)
                 sell_qty = pos.qty
-                if sell_qty > 0 and not self._has_pending(idx, "SELL"):
-                    self._place_order_real(idx, "SELL", sell_qty, self.spec.level_price(idx))
-                    self._mark_pending(idx, "SELL")
+                if sell_qty > 0 and not self.ord_sim.has_order(idx, "SELL"):
+                    self.ord_sim.place(idx, "SELL", sell_qty)
                     self.write_log(f"挂单: SELL | 层级: {idx} | 数量: {sell_qty}")
         else:
             # 无仓位：判断上一网格是否已经有仓位，若无且当前网格还没买入订单的，下买入订单
             up_idx = level_index + 1
             if up_idx <= self.spec.max_level_index:
                 up_pos = self.pos_book.get(up_idx)
-                if up_pos.qty <= 0 and not self._has_pending(level_index, "BUY"):
-                    self._place_order_real(level_index, "BUY", qty, self.spec.level_price(level_index))
-                    self._mark_pending(level_index, "BUY")
+                if up_pos.qty <= 0 and not self.ord_sim.has_order(level_index, "BUY"):
+                    self.ord_sim.place(level_index, "BUY", qty)
                     self.write_log(f"挂单: BUY | 层级: {level_index} | 数量: {qty}")
         
         # 每个价格时刻都确保挂单（不依赖是否有仓位）
         # 确保当前价格及以上5个网格（共5个网格：level_index 到 level_index+4）都有卖出订单
         for idx in range(level_index, min(self.spec.max_level_index + 1, level_index + 5)):
             pos = self.pos_book.get(idx)
-            if pos.qty > 0 and not self._has_pending(idx, "SELL"):
-                self._place_order_real(idx, "SELL", pos.qty, self.spec.level_price(idx))
-                self._mark_pending(idx, "SELL")
+            if pos.qty > 0 and not self.ord_sim.has_order(idx, "SELL"):
+                self.ord_sim.place(idx, "SELL", pos.qty)
                 self.write_log(f"挂单: SELL | 层级: {idx} | 数量: {pos.qty}")
         
         # 确保当前价格以下5个网格都有买入订单（买入成功时仓位挂在上一个网格）
         for idx in range(max(self.spec.min_level_index, level_index - 5), level_index):
-            if not self._has_pending(idx, "BUY"):
-                #self._place_order_real(idx, "BUY", qty, self.spec.level_price(idx))
-                self._mark_pending(idx, "BUY")
+            if not self.ord_sim.has_order(idx, "BUY"):
+                self.ord_sim.place(idx, "BUY", qty)
                 self.write_log(f"挂单: BUY | 层级: {idx} | 数量: {qty} (买入成功时仓位挂在上一个网格)")
         
-        # 3) 成交由实盘回调驱动；不做本地撮合
+        # 3) 处理买入订单成交（当价格到达该网格时）
+        if self.ord_sim.has_order(level_index, "BUY"):
+            matched = self.ord_sim.match_if_any(level_index, ts, price)
+            if matched:
+                self.write_log(f"{matched.side} 成交 | 价格: {matched.price:.6f} | 数量: {matched.qty} | 层级: {level_index}")
+                self.reporter.log_trade(matched)
+                # 买入成功时仓位挂在上一个网格
+                target_level = level_index + 1
+                if target_level <= self.spec.max_level_index:
+                    self.pos_book.buy_at_level(target_level, matched.price, matched.qty)
+                    self.write_log(f"买入成功，仓位挂在层级: {target_level}")
+                else:
+                    # 如果上一个网格越界，则挂在当前网格
+                    self.pos_book.buy_at_level(level_index, matched.price, matched.qty)
+                    self.write_log(f"买入成功，仓位挂在层级: {level_index} (上一网格越界)")
         
-        # 4) 成交由实盘回调驱动；不做本地撮合
+        # 4) 处理卖出订单成交（当价格到达该网格时）
+        if self.ord_sim.has_order(level_index, "SELL"):
+            matched = self.ord_sim.match_if_any(level_index, ts, price)
+            if matched:
+                self.write_log(f"{matched.side} 成交 | 价格: {matched.price:.6f} | 数量: {matched.qty} | 层级: {level_index}")
+                self.reporter.log_trade(matched)
+                # 卖出成功，减少对应网格的仓位
+                realized_qty = self.pos_book.sell_at_level(level_index, matched.qty)
+                if realized_qty < matched.qty:
+                    self.write_log(f"警告: 卖出数量 {matched.qty} 超过可用仓位 {realized_qty}")
     
     def on_tick(self, tick: TickData) -> None:
         """Tick数据更新时的回调函数（推送模式）"""
@@ -498,7 +509,37 @@ class GridStrategy(CtaTemplate):
                 grid_price = self.spec.level_price(lvl_idx)
                 self._handle_level_event(lvl_idx, grid_price, current_price)
             
-            # 不进行本地撮合；等待实盘回调
+            # 处理所有订单的自动成交（当价格满足条件时）
+            for idx in range(self.spec.min_level_index, self.spec.max_level_index + 1):
+                order_price = self.spec.level_price(idx)
+                
+                # 处理买入订单：只有当当前价格 <= 订单价格时才能成交
+                if self.ord_sim.has_order(idx, "BUY"):
+                    if current_price <= order_price:
+                        matched = self.ord_sim.match_if_any(idx, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), order_price)
+                        if matched:
+                            self.write_log(f"{matched.side} 成交 | 价格: {matched.price:.6f} | 数量: {matched.qty} | 层级: {idx} | 当前价格: {current_price:.6f}")
+                            self.reporter.log_trade(matched)
+                            # 买入成功时仓位挂在上一个网格
+                            target_level = idx + 1
+                            if target_level <= self.spec.max_level_index:
+                                self.pos_book.buy_at_level(target_level, matched.price, matched.qty)
+                                self.write_log(f"买入成功，仓位挂在层级: {target_level}")
+                            else:
+                                self.pos_book.buy_at_level(idx, matched.price, matched.qty)
+                                self.write_log(f"买入成功，仓位挂在层级: {idx} (上一网格越界)")
+                
+                # 处理卖出订单：只有当当前价格 >= 订单价格时才能成交
+                if self.ord_sim.has_order(idx, "SELL"):
+                    if current_price >= order_price:
+                        matched = self.ord_sim.match_if_any(idx, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), order_price)
+                        if matched:
+                            self.write_log(f"{matched.side} 成交 | 价格: {matched.price:.6f} | 数量: {matched.qty} | 层级: {idx} | 当前价格: {current_price:.6f}")
+                            self.reporter.log_trade(matched)
+                            # 卖出成功，减少对应网格的仓位
+                            realized_qty = self.pos_book.sell_at_level(idx, matched.qty)
+                            if realized_qty < matched.qty:
+                                self.write_log(f"警告: 卖出数量 {matched.qty} 超过可用仓位 {realized_qty}")
             
             self.put_event()
             
@@ -517,28 +558,6 @@ class GridStrategy(CtaTemplate):
     def on_trade(self, trade: TradeData) -> None:
         """成交时的回调函数"""
         self.put_event()
-
-    def set_order_placer(self, placer):
-        self._order_placer = placer
-
-    def _place_order_real(self, level_index: int, side: str, qty: int, price: float) -> None:
-        if self._order_placer is not None:
-            self._order_placer(level_index, side, qty, price)
-
-    def _mark_pending(self, level_index: int, side: str) -> None:
-        self._pending_orders.add((level_index, side))
-
-    def _has_pending(self, level_index: int, side: str | None = None) -> bool:
-        if side is None:
-            return (level_index, "BUY") in self._pending_orders or (level_index, "SELL") in self._pending_orders
-        return (level_index, side) in self._pending_orders
-
-    def on_order_filled(self, level_index: int, side: str) -> None:
-        try:
-            if (level_index, side) in self._pending_orders:
-                self._pending_orders.remove((level_index, side))
-        except Exception:
-            pass
 
 
 class GridStrategyManager:
@@ -573,14 +592,9 @@ class GridStrategyManager:
         self.simulate_date = simulate_date
         self.speed_factor = speed_factor
         self.mock_replayer: Optional[MockTickReplayer] = None
-        self.trader: Optional[easy_qmt_trader] = None
-        self._order_map: Dict[int, Dict[str, Any]] = {}
         
         mode_str = "模拟模式" if simulate else "实盘模式"
         print(f"初始化网格策略管理器 ({mode_str})，监控股票: {stock_code}")
-
-        # 始终初始化交易通道：simulate 仅用于数据订阅/回放，不影响下单
-        self._init_qmt_trader()
     
     def _convert_xtdata_to_tick(self, stock_code: str, tick_data: Dict) -> Optional[TickData]:
         """
@@ -741,10 +755,6 @@ class GridStrategyManager:
             # 初始化策略
             self.strategy.on_init()
             self.strategy.on_start()
-
-            # 只要交易通道存在，就注入真实下单函数（simulate 仅影响数据）
-            if self.trader is not None:
-                self.strategy.set_order_placer(self._place_real_order)
             
             print(f"策略实例创建成功: {strategy_name}")
             return True
@@ -753,62 +763,6 @@ class GridStrategyManager:
             print(f"创建策略实例失败: {e}")
             traceback.print_exc()
             return False
-
-    def _init_qmt_trader(self) -> None:
-        def on_filled(event: Dict[str, Any]):
-            try:
-                order_id = int(event.get("order_id", -1))
-                traded_price = float(event.get("traded_price", 0))
-                traded_volume = int(event.get("traded_volume", 0))
-                meta = self._order_map.pop(order_id, None)
-                if not meta or self.strategy is None or self.strategy.spec is None:
-                    return
-                level_index = meta["level_index"]
-                side = meta["side"]
-                ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                if side == "BUY":
-                    target_level = level_index + 1
-                    if target_level <= self.strategy.spec.max_level_index:
-                        self.strategy.pos_book.buy_at_level(target_level, traded_price, traded_volume)
-                    else:
-                        self.strategy.pos_book.buy_at_level(level_index, traded_price, traded_volume)
-                    self.strategy.reporter.log_trade(Trade(ts, traded_price, traded_volume, side))
-                else:
-                    realized_qty = self.strategy.pos_book.sell_at_level(level_index, traded_volume)
-                    self.strategy.reporter.log_trade(Trade(ts, traded_price, traded_volume, side))
-                # 清除挂单状态
-                try:
-                    self.strategy.on_order_filled(level_index, side)
-                except Exception:
-                    pass
-                self.strategy.put_event()
-            except Exception:
-                traceback.print_exc()
-
-        self.trader = build_qmt_trader_with_callback(
-            on_filled=on_filled,
-            path=self.strategy_params.get("qmt_path", r"D:/国金QMT交易端模拟/userdata_mini"),
-            account=self.strategy_params.get("qmt_account", "55009640"),
-            account_type=self.strategy_params.get("qmt_account_type", "STOCK"),
-            session_id=self.strategy_params.get("qmt_session_id", 123456),
-        )
-
-    def _place_real_order(self, level_index: int, side: str, qty: int, price: float) -> None:
-        if self.trader is None:
-            return
-        order_type = xtconstant.STOCK_BUY if side == "BUY" else xtconstant.STOCK_SELL
-        oid = self.trader.order_stock(
-            stock_code=self.stock_code,
-            order_type=order_type,
-            order_volume=qty,
-            price_type=xtconstant.FIX_PRICE,
-            price=price,
-        )
-        try:
-            oid_int = int(oid)
-            self._order_map[oid_int] = {"level_index": level_index, "side": side, "qty": qty, "price": price}
-        except Exception:
-            pass
     
     def _load_simulate_data(self) -> Optional[pd.DataFrame]:
         """
@@ -918,42 +872,6 @@ class GridStrategyManager:
             traceback.print_exc()
 
 
-def build_qmt_trader_with_callback(on_filled, path: str, account: str, account_type: str, session_id: int = 123456) -> easy_qmt_trader:
-    class MyXtQuantTraderCallbackNew(XtQuantTraderCallback):
-        def on_stock_order(self, order):
-            try:
-                # 56: 已成（根据 easy_qmt_trader README 的对照），或成交数量达到委托数量
-                if getattr(order, "order_status", None) == 56 or getattr(order, "traded_volume", 0) >= getattr(order, "order_volume", 0):
-                    evt = {
-                        "order_id": order.order_id,
-                        "stock_code": order.stock_code,
-                        "order_type": order.order_type,
-                        "order_volume": order.order_volume,
-                        "traded_volume": order.traded_volume,
-                        "traded_price": order.traded_price,
-                        "order_status": order.order_status,
-                    }
-                    on_filled(evt)
-            except Exception:
-                traceback.print_exc()
-
-        def on_stock_trade(self, trade):
-            # 仅在订单回报里处理“全部成交”，成交推送不直接触发
-            pass
-
-    #xt = XtQuantTrader(path, int(session_id))
-    #acc = StockAccount(account_id=account, account_type=account_type)
-    cb = MyXtQuantTraderCallbackNew()
-    #xt.register_callback(cb)
-    #xt.start()
-    #ret = xt.connect()
-    #if ret == 0:
-    #    xt.subscribe(acc)
-    trader = easy_qmt_trader()
-    trader.connect(cb)
-    print(trader.query_stock_positions())
-    return trader
-
 def run_realtime_strategy() -> None:
     """
     运行实时网格策略 - 使用推送模式获取数据
@@ -1010,7 +928,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--step", type=float, default=0.001, help="网格步长")
     parser.add_argument("--up_grids", type=int, default=10, help="向上网格数")
     parser.add_argument("--down_grids", type=int, default=20, help="向下网格数")
-    parser.add_argument("--lot_per_grid", type=int, default=1, help="每格手数")
+    parser.add_argument("--lot_per_grid", type=int, default=2, help="每格手数")
     parser.add_argument("--hand_size", type=int, default=100, help="每手股数")
     parser.add_argument("--out_dir", default="data/grid", help="输出目录")
     parser.add_argument(

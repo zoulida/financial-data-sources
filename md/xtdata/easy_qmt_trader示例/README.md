@@ -1,3 +1,452 @@
+# easy_qmt_trader
+
+#### 介绍
+easy_qmt_trader,easy_qmt_trader是建立在xtquant的二次开发的接口接口，使用方便，从qmt——trader复杂的系统里面独立出来
+完整的复杂的qmt_trader https://gitee.com/li-xingguo11111/qmt_trader
+
+
+#### 软件架构
+作者微信
+![输入图片说明](![image](https://github.com/user-attachments/assets/2704fbf4-7c24-4ee3-b289-48cfcffd94f3)
+)
+知识星球
+![](![image](https://github.com/user-attachments/assets/df928823-831f-488e-9270-622c5eb26e9b)
+)
+
+### 1. 参考视频教程配置xtquant就可以 下载直接当作第三方库使用
+视频https://www.bilibili.com/video/BV11KFNe5E5f/
+百度网盘下载 通过网盘分享的文件：easy_qmt_trader.7z
+链接: https://pan.baidu.com/s/1b6oxEqxylFN1SmN901qGEQ?pwd=qrf8 提取码: qrf8
+
+#### 使用说明
+
+1. 安装qmt登录打开选择独立模式
+![输入图片说明](![image](https://github.com/user-attachments/assets/feeb891d-2f3e-4b79-a491-d518104899e5)
+)
+### 2导入框架
+
+```
+from easy_qmt_trader import easy_qmt_trader
+models=easy_qmt_trader(path= r'E:/国金QMT交易端模拟/userdata_mini',
+                  session_id = 123456,account='55001947',account_type='STOCK',
+                  is_slippage=True,slippage=0.01)
+models.connect()
+position=models.position()
+print(position)
+
+```
+### 3链接qmt输入对应的账户，路径就可以
+输入
+
+```
+操作方式,登录qmt,选择行情加交易选,择极简模式
+作者:小果
+作者微信:15117320079,开实盘qmt可以联系我,开户也可以
+作者微信公众号:数据分析与运用
+公众号链接:https://mp.weixin.qq.com/s/rxGJpZYxdUIHitjvI-US1A
+作者知识星球:金融量化交易研究院  https://t.zsxq.com/19VzjjXNi
+链接qmt
+0
+```
+源代码
+
+```
+def connect(self):
+        '''
+        连接
+        path qmt userdata_min是路径
+        session_id 账户的标志,随便
+        account账户,
+        account_type账户内类型
+        '''
+        print('链接qmt')
+        # path为mini qmt客户端安装目录下userdata_mini路径
+        path = self.path
+        # session_id为会话编号，策略使用方对于不同的Python策略需要使用不同的会话编号
+        session_id = self.session_id
+        xt_trader = XtQuantTrader(path, session_id)
+        # 创建资金账号为1000000365的证券账号对象
+        account=self.account
+        account_type=self.account_type
+        acc = StockAccount(account_id=account,account_type=account_type)
+        # 创建交易回调类对象，并声明接收回调
+        callback = MyXtQuantTraderCallback()
+        xt_trader.register_callback(callback)
+        # 启动交易线程
+        xt_trader.start()
+        # 建立交易连接，返回0表示连接成功
+        connect_result = xt_trader.connect()
+        if connect_result==0:
+            # 对交易回调进行订阅，订阅后可以收到交易主推，返回0表示订阅成功
+            subscribe_result = xt_trader.subscribe(acc)
+            print(subscribe_result)
+            self.xt_trader=xt_trader
+            self.acc=acc
+            return xt_trader,acc
+        else:
+            print('qmt连接失败')
+```
+
+### 4读取账户
+
+```
+#读取账户
+account=trader.balance()
+print(account)
+
+```
+结果
+
+```
+账号类型      资金账户       可用金额  冻结金额      持仓市值        总资产
+0     2  55001947  298474.53   0.0  417029.8  712556.53
+```
+底层源代码
+
+```
+def balance(self):
+        '''
+        对接同花顺
+        '''
+        try:
+            asset = self.xt_trader.query_stock_asset(account=self.acc)
+            df=pd.DataFrame()
+            if asset:
+                df['账号类型']=[asset.account_type]
+                df['资金账户']=[asset.account_id]
+                df['可用金额']=[asset.cash]
+                df['冻结金额']=[asset.frozen_cash]
+                df['持仓市值']=[asset.market_value]
+                df['总资产']=[asset.total_asset]
+                return df
+        except:
+            print('获取账户失败，读取上次数据，谨慎使用')
+            df=pd.DataFrame()
+            return df
+```
+### 5读取持股
+
+```
+position=trader.position()
+print(position)
+```
+结果
+
+```
+持仓数量: 63
+    账号类型      资金账号    证券代码   股票余额   可用余额        成本价      参考成本价       市值
+0      2  55001947  510050    300    300   2.733667   2.733667    791.4
+1      2  55001947  511220    400    400  10.452000  10.452000   4133.2
+2      2  55001947  513100    500    500   1.603800   1.603800    822.0
+3      2  55001947  515450  11400  11400   1.448687   1.448687  15857.4
+4      2  55001947  600050   1800   1800   5.392833   5.392833   8766.0
+..   ...       ...     ...    ...    ...        ...        ...      ...
+58     2  55001947  688449    200    200  44.735450  44.735450   8674.0
+59     2  55001947  688571   1100   1100   7.776218   7.776218   7909.0
+60     2  55001947  688591    200    200  34.525350  34.525350   7306.0
+61     2  55001947  159659    500    500   1.575800   1.575800    872.0
+62     2  55001947  159830    100    100   6.230000   6.230000    645.8
+
+[63 rows x 8 columns]
+```
+源代码
+
+```
+def position(self):
+        '''
+        对接同花顺
+        持股
+        '''
+        try:
+            positions = self.xt_trader.query_stock_positions(self.acc)
+            print("持仓数量:", len(positions))
+            data=pd.DataFrame()
+            if len(positions) != 0:
+                for i in range(len(positions)):
+                    df=pd.DataFrame()
+                    df['账号类型']=[positions[i].account_type]
+                    df['资金账号']=[positions[i].account_id]
+                    df['证券代码']=[positions[i].stock_code]
+                    df['证券代码']=df['证券代码'].apply(lambda x:str(x)[:6])
+                    df['股票余额']=[positions[i].volume]
+                    df['可用余额']=[positions[i].can_use_volume]
+                    df['成本价']=[positions[i].open_price]
+                    df['参考成本价']=[positions[i].open_price]
+                    df['市值']=[positions[i].market_value]
+                    data=pd.concat([data,df],ignore_index=True)
+                return data
+            else:
+                df=pd.DataFrame()
+                df['账号类型']=None
+                df['资金账号']=None
+                df['证券代码']=None
+                df['股票余额']=None
+                df['可用余额']=None
+                df['成本价']=None
+                df['市值']=None
+                df['选择']=None
+                df['持股天数']=None
+                df['交易状态']=None
+                df['明细']=None
+                df['证券名称']=None
+                df['冻结数量']=None
+                df['市价']=None
+                df['盈亏']=None
+                df['盈亏比(%)']=None
+                df['当日买入']=None	
+                df['当日卖出']=None
+                return df
+                
+        except:
+            df=pd.DataFrame()
+            return df
+```
+### 6读取委托
+
+```
+df=trader.today_entrusts()
+df
+```
+结果
+
+```
+委托数量 0
+目前没有委托
+```
+源代码
+
+```
+def today_entrusts(self):
+        '''
+        对接同花顺
+        今天委托
+        '''
+        def select_data(x):
+            if x==48:
+                return '未报'
+            elif x==49:
+                return '待报'
+            elif x==50:
+                return '已报'
+            elif x==51:
+                return '已报待撤'
+            elif x==52:
+                return '部分待撤'
+            elif x==53:
+                return '部撤'
+            elif x==54:
+                return '已撤'
+            elif x==55:
+                return '部成'
+            elif x==56:
+                return '已成'
+            elif x==57:
+                return '废单'
+            else:
+                return '废单'
+        orders = self.xt_trader.query_stock_orders(self.acc)
+        print("委托数量", len(orders))
+        data=pd.DataFrame()
+        if len(orders) != 0:
+            for i in range(len(orders)):
+                df=pd.DataFrame()
+                df['账号类型']=[orders[i].account_type]
+                df['资金账号']=[orders[i].account_id]
+                df['证券代码']=[orders[i].stock_code]
+                df['证券代码']=df['证券代码'].apply(lambda x:str(x)[:6])
+                df['订单编号']=[orders[i].order_id]
+                df['柜台合同编号']=[orders[i].order_sysid]
+                df['报单时间']=[orders[i].order_time]
+                df['委托类型']=[orders[i].order_type]
+                df['委托数量']=[orders[i].order_volume]
+                df['报价类型']=[orders[i].price_type]
+                df['委托价格']=[orders[i].price]
+                df['成交数量']=[orders[i].traded_volume]
+                df['成交均价']=[orders[i].traded_price]
+                df['委托状态']=[orders[i].order_status]
+                df['委托状态描述']=[orders[i].status_msg]
+                df['策略名称']=[orders[i].strategy_name]
+                df['委托备注']=[orders[i].order_remark]
+                data=pd.concat([data,df],ignore_index=True)
+            data['报单时间']=df['报单时间'].apply(conv_time)
+            data['委托状态翻译']=data['委托状态'].apply(select_data)
+            data['未成交数量']=data['委托数量']-data['成交数量']
+            data['未成交价值']=data['未成交数量']*data['委托价格']
+            return data
+        else:
+            print('目前没有委托')
+            return data
+```
+### 7读取成交
+
+```
+df=trader.today_trades()
+df
+```
+
+```
+成交数量: 0
+今日没有成交
+```
+源代码
+
+```
+def today_trades(self):
+        '''
+        对接同花顺
+        今日成交
+        '''
+        trades = self.xt_trader.query_stock_trades(self.acc)
+        print("成交数量:", len(trades))
+        data=pd.DataFrame()
+        if len(trades) != 0:
+            for i in range(len(trades)):
+                df=pd.DataFrame()
+                df['账号类型']=[trades[i].account_type]
+                df['资金账号']=[trades[i].account_id]
+                df['证券代码']=[trades[i].stock_code]
+                df['证券代码']=df['证券代码'].apply(lambda x:str(x)[:6])
+                df['委托类型']=[trades[i].order_type]
+                df['成交编号']=[trades[i].traded_id]
+                df['成交时间']=[trades[i].traded_time]
+                df['成交均价']=[trades[i].traded_price]
+                df['成交数量']=[trades[i].traded_volume]
+                df['成交金额']=[trades[i].traded_amount]
+                df['订单编号']=[trades[i].order_id]
+                df['柜台合同编号']=[trades[i].order_sysid]
+                df['策略名称']=[trades[i].strategy_name]
+                df['委托备注']=[trades[i].order_remark]
+                data=pd.concat([data,df],ignore_index=True)
+            def select_data(x):
+                if x==xtconstant.STOCK_BUY:
+                    return '证券买入'
+                elif x==xtconstant.STOCK_SELL:
+                    return '证券卖出'
+                else:
+                    return '无'
+            df['操作']=df['委托类型'].apply(select_data)
+            data['成交时间']=pd.to_datetime(data['成交时间'],unit='s')
+            return data
+        else:
+            print('今日没有成交')     
+            return data
+```
+### 8买入函数
+
+```
+trader.buy(security='600031.SH', 
+                    amount=100,price=20,strategy_name='',order_remark='')
+                    
+```
+
+```
+trader.buy(security='600031.SH', 
+                    amount=100,price=20,strategy_name='',order_remark='')
+                    
+```
+源代码
+
+```
+def buy(self,security='600031.SH', order_type=xtconstant.STOCK_BUY,
+                    amount=100,price_type=xtconstant.FIX_PRICE,price=20,strategy_name='',order_remark=''):
+        '''
+        单独独立股票买入函数
+        '''
+        # 对交易回调进行订阅，订阅后可以收到交易主推，返回0表示订阅成功
+        subscribe_result = self.xt_trader.subscribe(self.acc)
+        print(self.xt_trader.query_stock_asset_async(account=self.acc,callback=subscribe_result))
+        #print(subscribe_result)
+        stock_code =self.adjust_stock(stock=security)
+        price=self.select_slippage(stock=security,price=price,trader_type='buy')
+        order_volume=amount
+        # 使用指定价下单，接口返回订单编号，后续可以用于撤单操作以及查询委托状态
+        if order_volume>0:
+            fix_result_order_id = self.xt_trader.order_stock_async(account=self.acc,stock_code=stock_code, order_type=order_type,
+                                                                order_volume=order_volume, price_type=price_type,
+                                                                price=price, strategy_name=strategy_name, order_remark=order_remark)
+            print('交易类型{} 代码{} 价格{} 数量{} 订单编号{}'.format(order_type,stock_code,price,order_volume,fix_result_order_id))
+            return fix_result_order_id
+        else:
+            print('买入 标的{} 价格{} 委托数量{}小于0有问题'.format(stock_code,price,order_volume))
+```
+### 9卖出函数
+
+```
+trader.sell(security='600031.SH', 
+                    amount=100,price=20,strategy_name='',order_remark='')
+                    
+```
+
+```
+None
+交易类型24 代码600031.SH 价格19.99 数量100 订单编号1082132432
+1082132432
+on order_error callback
+1082132432 -61 限价卖出 [SH600031] [COUNTER] [120141][证券交易未初始化]
+[init_date=20250127,curr_date=20250131]
+
+```
+
+```
+def sell(self,security='600031.SH', order_type=xtconstant.STOCK_SELL,
+                    amount=100,price_type=xtconstant.FIX_PRICE,price=20,strategy_name='',order_remark=''):
+        '''
+        单独独立股票卖出函数
+        '''
+        # 对交易回调进行订阅，订阅后可以收到交易主推，返回0表示订阅成功
+        subscribe_result = self.xt_trader.subscribe(self.acc)
+        print(self.xt_trader.query_stock_asset_async(account=self.acc,callback=subscribe_result))
+        #print(subscribe_result)
+        stock_code =self.adjust_stock(stock=security)
+        price=self.select_slippage(stock=security,price=price,trader_type='sell')
+        order_volume=amount
+        # 使用指定价下单，接口返回订单编号，后续可以用于撤单操作以及查询委托状态
+        if order_volume>0:
+            fix_result_order_id = self.xt_trader.order_stock(account=self.acc,stock_code=stock_code, order_type=order_type,
+                                                                order_volume=order_volume, price_type=price_type,
+                                                                price=price, strategy_name=strategy_name, order_remark=order_remark)
+            print('交易类型{} 代码{} 价格{} 数量{} 订单编号{}'.format(order_type,stock_code,price,order_volume,fix_result_order_id))
+            return fix_result_order_id
+        else:
+            print('卖出 标的{} 价格{} 委托数量{}小于0有问题'.format(stock_code,price,order_volume))
+```
+### 10撤单
+
+```
+trader.cancel_order_stock_async(order_id=12)
+
+```
+
+```
+ def cancel_order_stock_async(self,order_id=12):
+        '''
+        * 释义 
+        - 根据订单编号对委托进行异步撤单操作
+        * 参数
+        - account - StockAccount  资金账号 
+        - order_id - int 下单接口返回的订单编号
+        * 返回 
+        - 返回撤单请求序号, 成功委托后的撤单请求序号为大于0的正整数, 如果为-1表示委托失败
+        * 备注
+        - 如果失败，则通过撤单失败主推接口返回撤单失败信息
+        '''
+        # 使用订单编号撤单
+        cancel_order_result = self.xt_trader.cancel_order_stock_async(account=self.acc,order_id=order_id)
+        if cancel_order_result==0:
+            print('成功')
+        elif cancel_order_result==-1:
+            print('委托已完成撤单失败')
+        elif cancel_order_result==-2:
+            print('找到对应委托编号撤单失败')
+        elif cancel_order_result==-3:
+            print('账号未登陆撤单失败')
+        else:
+            pass
+        return cancel_order_result
+```
+### 11全部的底层源代码
+
+```
 from xtquant.xttrader import XtQuantTrader, XtQuantTraderCallback
 from xtquant.xttype import StockAccount
 from xtquant import xtconstant
@@ -80,8 +529,8 @@ class MyXtQuantTraderCallback(XtQuantTraderCallback):
         print("on_order_stock_async_response")
         print(response.account_id, response.order_id, response.seq)
 class easy_qmt_trader:
-    def __init__(self,path= r'D:\国金证券QMT交易端\userdata_mini',
-                  session_id = 123456,account='8886063599',account_type='STOCK',
+    def __init__(self,path= r'D:/国金QMT交易端模拟/userdata_mini',
+                  session_id = 123456,account='55009640',account_type='STOCK',
                   is_slippage=True,slippage=0.01) -> None:
         '''
         简化版的qmt_trder方便大家做策略的开发类的继承
@@ -96,6 +545,12 @@ class easy_qmt_trader:
             self.slippage=slippage
         else:
             self.slippage=0
+        print('操作方式,登录qmt,选择行情加交易选,择极简模式')
+        print('作者:小果')
+        print('作者微信:15117320079,开实盘qmt可以联系我,开户也可以')
+        print('作者微信公众号:数据分析与运用')
+        print('公众号链接:https://mp.weixin.qq.com/s/rxGJpZYxdUIHitjvI-US1A')
+        print("作者知识星球:金融量化交易研究院  https://t.zsxq.com/19VzjjXNi")
     def random_session_id(self):
         '''
         随机id
@@ -231,7 +686,7 @@ class easy_qmt_trader:
         else:
             print('不允许卖出没有持股：{} 持股{} 卖出{}'.format(stock,0,amount))
             return False
-    def connect(self, callback=MyXtQuantTraderCallback()):
+    def connect(self):
         '''
         连接
         path qmt userdata_min是路径
@@ -249,7 +704,8 @@ class easy_qmt_trader:
         account=self.account
         account_type=self.account_type
         acc = StockAccount(account_id=account,account_type=account_type)
-
+        # 创建交易回调类对象，并声明接收回调
+        callback = MyXtQuantTraderCallback()
         xt_trader.register_callback(callback)
         # 启动交易线程
         xt_trader.start()
@@ -280,11 +736,11 @@ class easy_qmt_trader:
             '''
         
             # 对交易回调进行订阅，订阅后可以收到交易主推，返回0表示订阅成功
-            #subscribe_result = self.xt_trader.subscribe(self.acc)
-            #print(self.xt_trader.query_stock_asset_async(account=self.acc,callback=subscribe_result))
+            subscribe_result = self.xt_trader.subscribe(self.acc)
+            print(self.xt_trader.query_stock_asset_async(account=self.acc,callback=subscribe_result))
             #print(subscribe_result)
             stock_code = self.adjust_stock(stock=stock_code)
-            #price=self.select_slippage(stock=stock_code,price=price,trader_type=order_type)
+            price=self.select_slippage(stock=stock_code,price=price,trader_type=order_type)
             # 使用指定价下单，接口返回订单编号，后续可以用于撤单操作以及查询委托状态
             fix_result_order_id = self.xt_trader.order_stock(account=self.acc,stock_code=stock_code, order_type=order_type,
                                                             order_volume=order_volume, price_type=price_type,
@@ -702,14 +1158,33 @@ class easy_qmt_trader:
     def stop(self):
         self.xt_trader.stop()
 if __name__=='__main__':
-    #models=easy_qmt_trader()
-    #models.connect()
-    #print(models.query_stock_orders())
-    #models.buy()
-    models1=easy_qmt_trader(account='8886063599',session_id=123457)
-    #models1=easy_qmt_trader(path= r'E:/国金QMT交易端模拟/userdata_mini',
-    #              session_id = 123456,account='55001947',account_type='STOCK',
-    #              is_slippage=True,slippage=0.01)
+    models=easy_qmt_trader()
+    models.connect()
+    print(models.query_stock_orders())
+    models.buy()
+    models1=easy_qmt_trader(account='55009680',session_id=123457)
     models1.connect()
     print(models1.query_stock_positions())
     
+
+```
+
+
+
+
+#### 参与贡献
+
+1.  Fork 本仓库
+2.  新建 Feat_xxx 分支
+3.  提交代码
+4.  新建 Pull Request
+
+
+#### 特技
+
+1.  使用 Readme\_XXX.md 来支持不同的语言，例如 Readme\_en.md, Readme\_zh.md
+2.  Gitee 官方博客 [blog.gitee.com](https://blog.gitee.com)
+3.  你可以 [https://gitee.com/explore](https://gitee.com/explore) 这个地址来了解 Gitee 上的优秀开源项目
+4.  [GVP](https://gitee.com/gvp) 全称是 Gitee 最有价值开源项目，是综合评定出的优秀开源项目
+5.  Gitee 官方提供的使用手册 [https://gitee.com/help](https://gitee.com/help)
+6.  Gitee 封面人物是一档用来展示 Gitee 会员风采的栏目 [https://gitee.com/gitee-stars/](https://gitee.com/gitee-stars/)
