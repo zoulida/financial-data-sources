@@ -311,6 +311,7 @@ class GridStrategy(CtaTemplate):
         self._simulate_mode = setting.get("simulate_mode", False)
         self._order_placer = None
         self._pending_orders = set()  # (level_index, side)
+        self._pending_details: Dict[tuple, Dict[str, Any]] = {}
         
     @property
     def qty_per_fill(self) -> int:
@@ -383,7 +384,21 @@ class GridStrategy(CtaTemplate):
         
         # 1) 若该网格已经发出订单且没有成交，则等待下一个价格
         if self._has_pending(level_index):
-            self.write_log(f"层级 {level_index} 已有订单未成交，等待下一个价格")
+            # 打印详细的未成交订单信息（可能同时存在BUY/SELL）
+            msgs = []
+            for s in ("BUY", "SELL"):
+                key = (level_index, s)
+                if key in self._pending_orders:
+                    det = self._pending_details.get(key, {})
+                    qty0 = det.get("qty", 0)
+                    px0 = det.get("price", self.spec.level_price(level_index))
+                    oid0 = det.get("order_id")
+                    if oid0 is not None:
+                        msgs.append(f"{s} | 订单编号: {oid0} | 价格: {px0:.6f} | 数量: {qty0}")
+                    else:
+                        msgs.append(f"{s} | 价格: {px0:.6f} | 数量: {qty0}")
+            detail = "；".join(msgs) if msgs else ""
+            self.write_log(f"层级 {level_index} 已有订单未成交，等待下一个价格{(' ｜ ' + detail) if detail else ''}")
             return
         
         # 2) 检查当前价格网格或以下网格是否有仓位
@@ -401,8 +416,9 @@ class GridStrategy(CtaTemplate):
                 pos = self.pos_book.get(idx)
                 sell_qty = pos.qty
                 if sell_qty > 0 and not self._has_pending(idx, "SELL"):
-                    self._place_order_real(idx, "SELL", sell_qty, self.spec.level_price(idx))
-                    self._mark_pending(idx, "SELL")
+                    price = self.spec.level_price(idx)
+                    self._place_order_real(idx, "SELL", sell_qty, price)
+                    self._mark_pending(idx, "SELL", sell_qty, price)
                     self.write_log(f"挂单: SELL | 层级: {idx} | 数量: {sell_qty}")
         else:
             # 无仓位：判断上一网格是否已经有仓位，若无且当前网格还没买入订单的，下买入订单
@@ -410,24 +426,27 @@ class GridStrategy(CtaTemplate):
             if up_idx <= self.spec.max_level_index:
                 up_pos = self.pos_book.get(up_idx)
                 if up_pos.qty <= 0 and not self._has_pending(level_index, "BUY"):
-                    self._place_order_real(level_index, "BUY", qty, self.spec.level_price(level_index))
-                    self._mark_pending(level_index, "BUY")
+                    price = self.spec.level_price(level_index)
+                    self._place_order_real(level_index, "BUY", qty, price)
+                    self._mark_pending(level_index, "BUY", qty, price)
                     self.write_log(f"挂单: BUY | 层级: {level_index} | 数量: {qty}")
         
         # 每个价格时刻都确保挂单（不依赖是否有仓位）
         # 确保当前价格及以上5个网格（共5个网格：level_index 到 level_index+4）都有卖出订单
-        for idx in range(level_index, min(self.spec.max_level_index + 1, level_index + 5)):
+        for idx in range(level_index, min(self.spec.max_level_index + 1, level_index + 3)):
             pos = self.pos_book.get(idx)
             if pos.qty > 0 and not self._has_pending(idx, "SELL"):
-                self._place_order_real(idx, "SELL", pos.qty, self.spec.level_price(idx))
-                self._mark_pending(idx, "SELL")
+                price = self.spec.level_price(idx)
+                self._place_order_real(idx, "SELL", pos.qty, price)
+                self._mark_pending(idx, "SELL", pos.qty, price)
                 self.write_log(f"挂单: SELL | 层级: {idx} | 数量: {pos.qty}")
         
         # 确保当前价格以下5个网格都有买入订单（买入成功时仓位挂在上一个网格）
         for idx in range(max(self.spec.min_level_index, level_index - 5), level_index):
             if not self._has_pending(idx, "BUY"):
-                #self._place_order_real(idx, "BUY", qty, self.spec.level_price(idx))
-                self._mark_pending(idx, "BUY")
+                self._place_order_real(idx, "BUY", qty, self.spec.level_price(idx))
+                price = self.spec.level_price(idx)
+                self._mark_pending(idx, "BUY", qty, price)
                 self.write_log(f"挂单: BUY | 层级: {idx} | 数量: {qty} (买入成功时仓位挂在上一个网格)")
         
         # 3) 成交由实盘回调驱动；不做本地撮合
@@ -525,13 +544,27 @@ class GridStrategy(CtaTemplate):
         if self._order_placer is not None:
             self._order_placer(level_index, side, qty, price)
 
-    def _mark_pending(self, level_index: int, side: str) -> None:
+    def _mark_pending(self, level_index: int, side: str, qty: int, price: float, order_id: Optional[int] = None) -> None:
         self._pending_orders.add((level_index, side))
+        self._pending_details[(level_index, side)] = {
+            "qty": qty,
+            "price": price,
+            "order_id": order_id,
+        }
 
     def _has_pending(self, level_index: int, side: str | None = None) -> bool:
         if side is None:
             return (level_index, "BUY") in self._pending_orders or (level_index, "SELL") in self._pending_orders
         return (level_index, side) in self._pending_orders
+
+    def on_order_placed(self, level_index: int, side: str, qty: int, price: float, order_id: int) -> None:
+        # 更新/补全订单编号，并打印挂单成功日志
+        self._pending_details[(level_index, side)] = {
+            "qty": qty,
+            "price": price,
+            "order_id": order_id,
+        }
+        self.write_log(f"挂单成功: {side} | 层级: {level_index} | 价格: {price:.6f} | 数量: {qty} | 订单编号: {order_id}")
 
     def on_order_filled(self, level_index: int, side: str) -> None:
         try:
@@ -575,12 +608,17 @@ class GridStrategyManager:
         self.mock_replayer: Optional[MockTickReplayer] = None
         self.trader: Optional[easy_qmt_trader] = None
         self._order_map: Dict[int, Dict[str, Any]] = {}
+        self._trade_seq: int = 0
         
         mode_str = "模拟模式" if simulate else "实盘模式"
         print(f"初始化网格策略管理器 ({mode_str})，监控股票: {stock_code}")
 
         # 始终初始化交易通道：simulate 仅用于数据订阅/回放，不影响下单
         self._init_qmt_trader()
+
+    def _next_trade_id(self) -> int:
+        self._trade_seq += 1
+        return self._trade_seq
     
     def _convert_xtdata_to_tick(self, stock_code: str, tick_data: Dict) -> Optional[TickData]:
         """
@@ -757,10 +795,20 @@ class GridStrategyManager:
     def _init_qmt_trader(self) -> None:
         def on_filled(event: Dict[str, Any]):
             try:
-                order_id = int(event.get("order_id", -1))
+                order_id_raw = event.get("order_id", None)
+                # 兼容字符串/整数订单编号
+                order_id_str = str(order_id_raw) if order_id_raw is not None else None
+                try:
+                    order_id_int = int(order_id_raw) if order_id_raw is not None else None
+                except Exception:
+                    order_id_int = None
                 traded_price = float(event.get("traded_price", 0))
                 traded_volume = int(event.get("traded_volume", 0))
-                meta = self._order_map.pop(order_id, None)
+                meta = None
+                if order_id_int is not None:
+                    meta = self._order_map.pop(order_id_int, None)
+                if meta is None and order_id_str is not None:
+                    meta = self._order_map.pop(order_id_str, None)
                 if not meta or self.strategy is None or self.strategy.spec is None:
                     return
                 level_index = meta["level_index"]
@@ -772,10 +820,35 @@ class GridStrategyManager:
                         self.strategy.pos_book.buy_at_level(target_level, traded_price, traded_volume)
                     else:
                         self.strategy.pos_book.buy_at_level(level_index, traded_price, traded_volume)
-                    self.strategy.reporter.log_trade(Trade(ts, traded_price, traded_volume, side))
+                
+                    tr = Trade(
+                        trade_id=self._next_trade_id(),
+                        order_id=int(order_id_int) if order_id_int is not None else int(order_id_str) if order_id_str and order_id_str.isdigit() else 0,
+                        ts=ts,
+                        side=side,
+                        price=traded_price,
+                        qty=traded_volume,
+                        level_index=level_index,
+                    )
+                    self.strategy.reporter.log_trade(tr)
                 else:
                     realized_qty = self.strategy.pos_book.sell_at_level(level_index, traded_volume)
-                    self.strategy.reporter.log_trade(Trade(ts, traded_price, traded_volume, side))
+                    tr = Trade(
+                        trade_id=self._next_trade_id(),
+                        order_id=int(order_id_int) if order_id_int is not None else int(order_id_str) if order_id_str and order_id_str.isdigit() else 0,
+                        ts=ts,
+                        side=side,
+                        price=traded_price,
+                        qty=traded_volume,
+                        level_index=level_index,
+                    )
+                    self.strategy.reporter.log_trade(tr)
+                # 成交日志（方向/层级/价格/数量/订单编号）
+                try:
+                    oid_log = order_id_str if order_id_str is not None else str(order_id_int)
+                    self.strategy.write_log(f"成交: {side} | 层级: {level_index} | 价格: {traded_price:.6f} | 数量: {traded_volume} | 订单编号: {oid_log}")
+                except Exception:
+                    pass
                 # 清除挂单状态
                 try:
                     self.strategy.on_order_filled(level_index, side)
@@ -805,8 +878,20 @@ class GridStrategyManager:
             price=price,
         )
         try:
-            oid_int = int(oid)
-            self._order_map[oid_int] = {"level_index": level_index, "side": side, "qty": qty, "price": price}
+            # 兼容字符串/整数订单编号，映射两份键
+            oid_str = str(oid)
+            self._order_map[oid_str] = {"level_index": level_index, "side": side, "qty": qty, "price": price}
+            try:
+                oid_int = int(oid)
+                self._order_map[oid_int] = {"level_index": level_index, "side": side, "qty": qty, "price": price}
+            except Exception:
+                oid_int = None
+            # 通知策略：挂单成功，带订单编号
+            if self.strategy is not None:
+                try:
+                    self.strategy.on_order_placed(level_index, side, qty, price, oid_str if oid_int is None else oid_int)
+                except Exception:
+                    pass
         except Exception:
             pass
     
@@ -1006,7 +1091,7 @@ def run_realtime_strategy() -> None:
 def main(argv: list[str] | None = None) -> int:
     """命令行入口"""
     parser = argparse.ArgumentParser(description="Run grid strategy with vnpy framework")
-    parser.add_argument("--symbol", default="512710.SH", help="股票代码")
+    parser.add_argument("--symbol", default="162411.SZ", help="股票代码")
     parser.add_argument("--step", type=float, default=0.001, help="网格步长")
     parser.add_argument("--up_grids", type=int, default=10, help="向上网格数")
     parser.add_argument("--down_grids", type=int, default=20, help="向下网格数")
@@ -1016,7 +1101,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--baseline",
         type=float,
-        default=None,
+        default=0.723,
         help="若提供则使用该基准价（例如 0.680）；否则用9:30开盘价",
     )
     parser.add_argument(
