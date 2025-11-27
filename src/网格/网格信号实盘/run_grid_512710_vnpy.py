@@ -312,6 +312,7 @@ class GridStrategy(CtaTemplate):
         self._order_placer = None
         self._pending_orders = set()  # (level_index, side)
         self._pending_details: Dict[tuple, Dict[str, Any]] = {}
+        self._pos_loaded_from_text = False
         
     @property
     def qty_per_fill(self) -> int:
@@ -353,13 +354,14 @@ class GridStrategy(CtaTemplate):
         
         self.write_log(f"Baseline={baseline:.6f}, Grid [{min_px:.6f}, {max_px:.6f}]")
         
-        # 初始化：默认所有上网格都有仓位
-        qty = self.qty_per_fill
-        for level_idx in range(1, self.spec.max_level_index + 1):
-            # 使用baseline价格作为初始成本价
-            self.pos_book.set_holding(level_idx, baseline, qty)
-        
-        self.write_log(f"初始化完成：所有上网格(1到{self.spec.max_level_index})已设置仓位，每格{qty}股")
+        if not self._pos_loaded_from_text:
+            # 初始化：默认所有上网格都有仓位
+            qty = self.qty_per_fill
+            for level_idx in range(1, self.spec.max_level_index + 1):
+                # 使用baseline价格作为初始成本价
+                self.pos_book.set_holding(level_idx, baseline, qty)
+            
+            self.write_log(f"初始化完成：所有上网格(1到{self.spec.max_level_index})已设置仓位，每格{qty}股")
         self.initialized = True
     
     def _get_baseline_from_open(self, tick: TickData) -> Optional[float]:
@@ -784,6 +786,10 @@ class GridStrategyManager:
             if self.trader is not None:
                 self.strategy.set_order_placer(self._place_real_order)
             
+            if not self._init_positions_text_and_check():
+                print("用户取消，停止策略创建")
+                return False
+
             print(f"策略实例创建成功: {strategy_name}")
             return True
             
@@ -855,6 +861,7 @@ class GridStrategyManager:
                 except Exception:
                     pass
                 self.strategy.put_event()
+                self._save_positions_to_text()
             except Exception:
                 traceback.print_exc()
 
@@ -895,6 +902,110 @@ class GridStrategyManager:
         except Exception:
             pass
     
+    def _positions_text_path(self) -> Path:
+        base = Path(__file__).resolve().parent / "positionsRecord"
+        base.mkdir(parents=True, exist_ok=True)
+        code = self.stock_code
+        return base / f"grid_positions_{code}.csv"
+
+    def _save_positions_to_text(self) -> None:
+        try:
+            if self.strategy is None:
+                return
+            snap = self.strategy.pos_book.snapshot()
+            path = self._positions_text_path()
+            with open(path, "w", encoding="utf-8") as f:
+                f.write("level_idx,qty,avg_cost\n")
+                for idx, qty, avg_cost in snap:
+                    if qty > 0:
+                        f.write(f"{idx},{qty},{avg_cost:.6f}\n")
+        except Exception:
+            traceback.print_exc()
+
+    def _load_positions_from_text(self) -> None:
+        try:
+            if self.strategy is None:
+                return
+            path = self._positions_text_path()
+            if not path.exists():
+                with open(path, "w", encoding="utf-8") as f:
+                    f.write("level_idx,qty,avg_cost\n")
+                return
+            book = PositionBook()
+            with open(path, "r", encoding="utf-8") as f:
+                lines = [line.strip() for line in f if line.strip()]
+            if len(lines) <= 1:
+                self.strategy.pos_book = book
+                try:
+                    self.strategy._pos_loaded_from_text = True
+                except Exception:
+                    pass
+                return
+            for line in lines[1:]:
+                parts = [p.strip() for p in line.split(",")]
+                if len(parts) < 3:
+                    continue
+                try:
+                    level_idx = int(float(parts[0]))
+                    qty = int(float(parts[1]))
+                    avg_cost = float(parts[2])
+                except Exception:
+                    continue
+                if qty > 0:
+                    book.set_holding(level_idx, avg_cost, qty)
+            self.strategy.pos_book = book
+            try:
+                self.strategy._pos_loaded_from_text = True
+            except Exception:
+                pass
+        except Exception:
+            traceback.print_exc()
+
+    def _xt_position_qty_for_symbol(self) -> int:
+        try:
+            if self.trader is None:
+                return 0
+            df = self.trader.query_stock_positions()
+            if df is None or df.empty:
+                return 0
+            code6 = self.stock_code.split(".")[0]
+            codes = df.get("证券代码")
+            if codes is None:
+                return 0
+            mask = codes.astype(str) == code6
+            if not mask.any():
+                return 0
+            qtys = df.loc[mask, "持仓数量"]
+            total = int(float(qtys.fillna(0).sum()))
+            return total
+        except Exception:
+            traceback.print_exc()
+            return 0
+
+    def _text_total_qty(self) -> int:
+        try:
+            if self.strategy is None:
+                return 0
+            snap = self.strategy.pos_book.snapshot()
+            return int(sum(q for _, q, _ in snap))
+        except Exception:
+            return 0
+
+    def _init_positions_text_and_check(self) -> bool:
+        try:
+            self._load_positions_from_text()
+            txt_qty = self._text_total_qty()
+            xt_qty = self._xt_position_qty_for_symbol()
+            if xt_qty != txt_qty:
+                print(f"检测到持仓不一致：xtquant={xt_qty}，文本={txt_qty}。按回车继续，输入 n 取消。")
+                ans = input().strip().lower()
+                if ans in ("n", "no", "q", "quit", "cancel", "c"):
+                    return False
+            return True
+        except Exception:
+            traceback.print_exc()
+            return True
+
     def _load_simulate_data(self) -> Optional[pd.DataFrame]:
         """
         加载模拟模式所需的历史tick数据
