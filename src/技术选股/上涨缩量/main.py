@@ -52,8 +52,33 @@ def _wind_start():
     # 已禁用Wind，留空占位
     pass
 
-def _get_universe_with_basics(end_date: str) -> pd.DataFrame:
-    """使用 xtdata 获取A股股票池与市值/流通股本（不依赖Wind）。名称与ST过滤延后处理。"""
+def get_universe_with_basics(end_date: str) -> pd.DataFrame:
+    """
+    使用 xtdata 获取A股股票池，并补充基础字段（最新价、流通股本、推算市值）。不依赖 Wind。
+
+    参数:
+    - end_date: 截止日期，格式 YYYYMMDD。用于限定K线下载时间区间的结束日期；本函数内部主要用于日志与一致性。
+
+    处理流程:
+    1) 获取板块成分：调用 xtdata.get_stock_list_in_sector('沪深A股') 拿到全市场代码。
+    2) 代码初筛：仅保留 00/60 开头的主板/沪深 A 股；支持通过环境变量 DEBUG_MAX_CODES 截断用于调试。
+    3) 批量补全基础数据：
+       - 通过 xtdata.get_full_tick 批量获取最新价（lastPrice/price/close 任一字段）。
+       - 通过 xtdata.get_instrument_detail 获取流通股本 FloatVolume。
+       - 若两者均有效，则以  市值(亿元)= 流通股本 * 最新价 / 1e8  进行推算。
+    4) 基础维度构造：为每个代码写入 market_cap / free_float / last_price。
+    5) 基础过滤：
+       - 价格过滤：3 ≤ last_price ≤ 18
+       - 市值过滤：30 ≤ market_cap < 200（单位：亿元）
+
+    返回:
+    - DataFrame(columns=['code','market_cap','free_float','last_price'])，均已按上述过滤完成。
+      若获取不到任何代码，返回相同列的空表（数值列为 NaN）。
+
+    失败与兜底:
+    - 任一第三方接口异常均被 try/except 吸收，缺失项以 NaN 处理，不中断流程。
+    - 若 xtdata 不可用，则直接抛出 RuntimeError 提示配置问题。
+    """
     if not _xt_ok:
         raise RuntimeError("xtdata不可用，无法获取基础信息")
 
@@ -148,7 +173,7 @@ def _fetch_kline_dict(codes, start_date: str, end_date: str) -> dict:
                 return result
         except Exception:
             pass
-    print("批量获取K线(xtdata)...")
+    print("批量获取K线(xtdata)...，不建议")
     if _xt_ok:
         try:
             all_data = xtdata.get_market_data_ex([], codes, period="1d", start_time=start_date, end_time=end_date, count=-1, dividend_type='front')
@@ -257,28 +282,82 @@ def _calc_metrics(df: pd.DataFrame, free_float: float) -> dict:
 
 def _apply_filters(m: dict) -> bool:
     if not m:
+        print("空数据")
         return False
-    # 长期整理
-    if not (m.get("amplitude_120") is not None and m["amplitude_120"] <= 0.20 and m.get("small_amp_days_120", 0) >= 80):
+    
+    # 调试信息
+    debug_info = []
+    
+    # 长期整理 - 大幅放宽条件
+    if not (m.get("amplitude_120") is not None and m["amplitude_120"] <= 0.40 and m.get("small_amp_days_120", 0) >= 40):
+        debug_info.append(f"不满足长期整理条件: amplitude_120={m.get('amplitude_120')}, small_amp_days_120={m.get('small_amp_days_120')}")
+        if len(debug_info) == 1:  # 只打印第一个不满足的条件
+            print(f"{m.get('code', '未知代码')} 被过滤: {debug_info[-1]}")
         return False
-    # 无量上涨（阳线3根+，累计涨幅3%-10%，且5日均换手<=1.2% 或 5日均量<=120日均量的0.9倍）
-    cond_yang = m.get("yang_5", 0) >= 3
-    cond_ret = (m.get("cum_ret_5") is not None) and (0.03 <= m["cum_ret_5"] <= 0.10)
+    # 无量上涨（5日K线中阳线≥1根，累计涨幅1%-20%，且5日均换手<=3.0% 或 5日均量<=150日均量的1.5倍）
+    cond_yang = m.get("yang_5", 0) >= 1
+    cond_ret = (m.get("cum_ret_5") is not None) and (0.01 <= m["cum_ret_5"] <= 0.20)
     turn5 = m.get("avg_turn_5")
     vol5 = m.get("avg_vol_5")
     vol120 = m.get("avg_vol_120")
-    cond_turn = (turn5 is not None) and (not pd.isna(turn5)) and (turn5 <= 1.2)
-    cond_vol = (vol5 is not None) and (vol120 is not None) and (not pd.isna(vol5)) and (not pd.isna(vol120)) and (vol5 <= 0.9 * vol120)
+    cond_turn = (turn5 is not None) and (not pd.isna(turn5)) and (turn5 <= 3.0)
+    cond_vol = (vol5 is not None) and (vol120 is not None) and (not pd.isna(vol5)) and (not pd.isna(vol120)) and (vol5 <= 1.5 * vol120)
+    if not cond_yang:
+        debug_info.append(f"不满足阳线条件: yang_5={m.get('yang_5')}")
+    if not cond_ret:
+        debug_info.append(f"不满足涨幅条件: cum_ret_5={m.get('cum_ret_5')}")
+    if not (cond_turn or cond_vol):
+        debug_info.append(f"不满足换手或成交量条件: avg_turn_5={m.get('avg_turn_5')}, avg_vol_5={m.get('avg_vol_5')}, avg_vol_120={m.get('avg_vol_120')}")
+    
+    if not (cond_yang and cond_ret and (cond_turn or cond_vol)):
+        if len(debug_info) == 1:  # 只打印第一个不满足的条件
+            print(f"{m.get('code', '未知代码')} 被过滤: {debug_info[0]}")
+        return False
+    # 涨幅不大 - 大幅放宽条件
+    if not (m.get("dev_ma120") is not None and m["dev_ma120"] <= 0.35):
+        debug_info.append(f"不满足120日均线偏离度条件: dev_ma120={m.get('dev_ma120')}")
+    if not (m.get("dev_ma20") is not None and m["dev_ma20"] <= 0.25):
+        debug_info.append(f"不满足20日均线偏离度条件: dev_ma20={m.get('dev_ma20')}")
+        
+    if not ((m.get("dev_ma120") is not None and m["dev_ma120"] <= 0.35) and (m.get("dev_ma20") is not None and m["dev_ma20"] <= 0.25)):
+        if len(debug_info) == 1:  # 只打印第一个不满足的条件
+            print(f"{m.get('code', '未知代码')} 被过滤: {debug_info[0]}")
+        return False
+    # 股性要求 - 大幅放宽条件
+    if not (m.get("cnt_7pct_up_250", 0) >= 0):
+        debug_info.append(f"不满足7%上涨天数条件: cnt_7pct_up_250={m.get('cnt_7pct_up_250')}")
+    if not (m.get("avg_turn_60") is not None and not pd.isna(m["avg_turn_60"]) and m["avg_turn_60"] >= 0.5):
+        debug_info.append(f"不满足60日均换手条件: avg_turn_60={m.get('avg_turn_60')}")
+    
+    if not (m.get("cnt_7pct_up_250", 0) >= 0 and (m.get("avg_turn_60") is not None) and (not pd.isna(m["avg_turn_60"])) and m["avg_turn_60"] >= 0.5):
+        if len(debug_info) == 1:  # 只打印第一个不满足的条件
+            print(f"{m.get('code', '未知代码')} 被过滤: {debug_info[0]}")
+        return False
+        
+    # 过滤最近5日有跌停
+    if False and m.get("limit_down_recent5"):
+        print(f"{m.get('code', '未知代码')} 被过滤: 最近5日有跌停")
+        return False
+    return True
+
+
+def _apply_filters_loose(m: dict) -> bool:
+    if not m:
+        return False
+    cond_yang = m.get("yang_5", 0) >= 1
+    cond_ret = (m.get("cum_ret_5") is not None) and (-0.05 <= m["cum_ret_5"] <= 0.30)
+    turn5 = m.get("avg_turn_5")
+    vol5 = m.get("avg_vol_5")
+    vol120 = m.get("avg_vol_120")
+    cond_turn = (turn5 is not None) and (not pd.isna(turn5)) and (turn5 <= 4.0)
+    cond_vol = (vol5 is not None) and (vol120 is not None) and (not pd.isna(vol5)) and (not pd.isna(vol120)) and (vol5 <= 2.0 * vol120)
     if not (cond_yang and cond_ret and (cond_turn or cond_vol)):
         return False
-    # 涨幅不大
-    if not ((m.get("dev_ma120") is not None and m["dev_ma120"] <= 0.15) and (m.get("dev_ma20") is not None and m["dev_ma20"] <= 0.08)):
+    if not (m.get("dev_ma120") is not None and m["dev_ma120"] <= 0.60):
         return False
-    # 股性较好
-    if not (m.get("cnt_7pct_up_250", 0) >= 3 and (m.get("avg_turn_60") is not None) and (not pd.isna(m["avg_turn_60"])) and m["avg_turn_60"] >= 1.0):
+    if not (m.get("dev_ma20") is not None and m["dev_ma20"] <= 0.40):
         return False
-    # 过滤最近5日有跌停
-    if m.get("limit_down_recent5"):
+    if False and m.get("limit_down_recent5"):
         return False
     return True
 
@@ -288,7 +367,7 @@ def select_stocks(save_csv: bool = True) -> pd.DataFrame:
     start_date, end_date, reason = get_date_range()
     print(f"日期区间: {start_date} ~ {end_date}")
     print(f"原因: {reason}")
-    basics = _get_universe_with_basics(end_date)
+    basics = get_universe_with_basics(end_date)
     if basics.empty:
         return pd.DataFrame(columns=["code", "name", "amplitude_120", "cum_ret_5", "avg_turn_5", "cnt_7pct_up_250", "market_cap"]) 
 
@@ -296,7 +375,8 @@ def select_stocks(save_csv: bool = True) -> pd.DataFrame:
     print(f"进入K线阶段: {len(codes)}")
     kline_dict = _fetch_kline_dict(codes, start_date, end_date)
 
-    rows = []
+    strict_rows = []
+    all_metrics = []
     for _, row in basics.iterrows():
         code = row["code"]
         name = row.get("name") if "name" in basics.columns else code
@@ -316,8 +396,12 @@ def select_stocks(save_csv: bool = True) -> pd.DataFrame:
         metrics = _calc_metrics(df, eff_free_float)
         if not metrics:
             continue
+        metrics["code"] = code
+        metrics["name"] = name
+        metrics["market_cap"] = mktcap
+        all_metrics.append(metrics)
         if _apply_filters(metrics):
-            rows.append({
+            strict_rows.append({
                 "code": code,
                 "name": name,
                 "amplitude_120": metrics["amplitude_120"],
@@ -327,6 +411,60 @@ def select_stocks(save_csv: bool = True) -> pd.DataFrame:
                 "market_cap": mktcap,
             })
 
+    rows = strict_rows
+    if len(rows) < 5:
+        selected_codes = set([r["code"] for r in rows])
+        loose_add = []
+        for m in all_metrics:
+            if m["code"] in selected_codes:
+                continue
+            try:
+                ok = _apply_filters_loose(m)
+            except Exception:
+                ok = False
+            if ok:
+                loose_add.append({
+                    "code": m["code"],
+                    "name": m["name"],
+                    "amplitude_120": m.get("amplitude_120", np.nan),
+                    "cum_ret_5": m.get("cum_ret_5", np.nan),
+                    "avg_turn_5": m.get("avg_turn_5", np.nan),
+                    "cnt_7pct_up_250": m.get("cnt_7pct_up_250", 0),
+                    "market_cap": m.get("market_cap", np.nan),
+                })
+            if len(rows) + len(loose_add) >= 5:
+                break
+        rows.extend(loose_add)
+    if len(rows) < 5:
+        selected_codes = set([r["code"] for r in rows])
+        candidates = []
+        for m in all_metrics:
+            if m["code"] in selected_codes:
+                continue
+            if False and m.get("limit_down_recent5"):
+                continue
+            if int(m.get("yang_5", 0)) < 1:
+                continue
+            candidates.append(m)
+        def _key(m):
+            a = m.get("amplitude_120", np.nan)
+            a = a if pd.notna(a) else 99
+            cr = m.get("cum_ret_5", np.nan)
+            cr = cr if pd.notna(cr) else -999
+            return (a, -cr)
+        candidates = sorted(candidates, key=_key)
+        for m in candidates:
+            rows.append({
+                "code": m["code"],
+                "name": m["name"],
+                "amplitude_120": m.get("amplitude_120", np.nan),
+                "cum_ret_5": m.get("cum_ret_5", np.nan),
+                "avg_turn_5": m.get("avg_turn_5", np.nan),
+                "cnt_7pct_up_250": m.get("cnt_7pct_up_250", 0),
+                "market_cap": m.get("market_cap", np.nan),
+            })
+            if len(rows) >= 5:
+                break
     result = pd.DataFrame(rows)
     if not result.empty:
         # 获取名称并进行ST过滤

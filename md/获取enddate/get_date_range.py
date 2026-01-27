@@ -28,7 +28,7 @@ except ImportError as e:
     print(f"当前sys.path: {sys.path}")
     sys.exit(1)
 
-@shelve_me_hour
+#@shelve_me_hour
 def get_date_range():
     """
     获取数据查询的日期范围

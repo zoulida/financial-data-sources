@@ -296,7 +296,7 @@ def backtest_nextday_open2close(ev: pd.DataFrame, probs: np.ndarray, daily_bars:
     return {"days": int(len(arr)), "avg_daily_ret": float(mu), "sharpe": float(sharpe), "max_drawdown": float(mdd)}
 
 
-def run(start="20160101", end=None, limit_codes: int = 1000) -> Dict:
+def run(start="20241101", end=None, limit_codes: int = 6000) -> Dict:
     if end is None:
         end = dt.date.today().strftime("%Y%m%d")
     codes = get_a_share_codes()
