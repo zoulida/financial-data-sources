@@ -77,6 +77,56 @@ def fetch_day_k(stock_code: str, start_date: str, end_date: str, is_download: in
     return _fetch_day_k_xt(stock_code, start_date, end_date, dividend_type)
 
 
+def _filter_massive_divergence(
+    df: pd.DataFrame, 
+    code: str, 
+    universe: pd.DataFrame, 
+    ma_window: int = 20, 
+    ratio: float = 4.0
+) -> Optional[dict]:
+    """
+    筛选巨量分歧：最近一根K线的成交额 > 成交额均线的 ratio 倍。
+    1) 对45天以内检测
+    2) K线的成交额 > 成交额均线的 ratio 倍，且这个K线是5天内的第一根符合条件的K线
+    
+    Args:
+        df: 股票K线数据
+        code: 股票代码
+        universe: 股票池数据
+        ma_window: 成交额均线窗口
+        ratio: 倍数阈值
+        
+    Returns:
+        符合条件的股票信息字典，不符合则返回None
+    """
+    # 计算成交额均线（使用完整数据确保均线计算准确）
+    df = df.sort_values("date").reset_index(drop=True)
+    df["ma_amount"] = df["amount"].rolling(window=ma_window, min_periods=ma_window).mean()
+    
+    # 只在最近45天内寻找符合条件的K线
+    recent_45_days = df.tail(45)
+    # 进一步限制为最近5天内，找到第一根符合条件的K线
+    recent_5_days = recent_45_days.tail(5)
+    
+    for idx, row in recent_5_days.iterrows():
+        ma_val = row.get("ma_amount", np.nan)
+        last_amt = row.get("amount", np.nan)
+        
+        if pd.notna(ma_val) and pd.notna(last_amt) and last_amt > ratio * ma_val:
+            return {
+                "code": code,
+                "date": str(row.get("date", "")),
+                "close": row.get("close", np.nan),
+                "amount": float(last_amt),
+                "ma_amount": float(ma_val),
+                "ratio": float(last_amt / ma_val) if ma_val not in (0, np.nan) else np.nan,
+                "market_cap": universe.loc[universe["code"] == code, "market_cap"].values[0] if (universe["code"] == code).any() else np.nan,
+                "last_price": universe.loc[universe["code"] == code, "last_price"].values[0] if (universe["code"] == code).any() else np.nan,
+            }
+    
+    return None
+
+
 def scan_massive_divergence(
     max_price: float = 15.0,
     max_mcap: float = 150.0,
@@ -86,7 +136,7 @@ def scan_massive_divergence(
     limit: int = 0,
 ) -> pd.DataFrame:
     """
-    扫描“巨量分歧”：最近一根K线的成交额 > 成交额均线的 ratio 倍。
+    扫描"巨量分歧"：最近一根K线的成交额 > 成交额均线的 ratio 倍。
     """
     start_date, end_date, _ = get_date_range()
 
@@ -102,23 +152,12 @@ def scan_massive_divergence(
             df = fetch_day_k(code, start_date, end_date, is_download=is_download, dividend_type="front")
             if df is None or df.empty or "amount" not in df.columns:
                 continue
-            # 计算成交额均线
-            df = df.sort_values("date").reset_index(drop=True)
-            df["ma_amount"] = df["amount"].rolling(window=ma_window, min_periods=ma_window).mean()
-            last_row = df.iloc[-1]
-            ma_val = last_row.get("ma_amount", np.nan)
-            last_amt = last_row.get("amount", np.nan)
-            if pd.notna(ma_val) and pd.notna(last_amt) and last_amt > ratio * ma_val:
-                results.append({
-                    "code": code,
-                    "date": str(last_row.get("date", "")),
-                    "close": last_row.get("close", np.nan),
-                    "amount": float(last_amt),
-                    "ma_amount": float(ma_val),
-                    "ratio": float(last_amt / ma_val) if ma_val not in (0, np.nan) else np.nan,
-                    "market_cap": universe.loc[universe["code"] == code, "market_cap"].values[0] if (universe["code"] == code).any() else np.nan,
-                    "last_price": universe.loc[universe["code"] == code, "last_price"].values[0] if (universe["code"] == code).any() else np.nan,
-                })
+            
+            # 使用筛选函数
+            result = _filter_massive_divergence(df, code, universe, ma_window, ratio)
+            if result is not None:
+                results.append(result)
+                
         except Exception:
             continue
 
