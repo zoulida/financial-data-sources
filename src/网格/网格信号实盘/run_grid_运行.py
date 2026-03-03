@@ -225,11 +225,11 @@ class MockTickReplayer:
                 # 调用回调函数
                 self.callback({self.symbol: tick_dict})
                 
-                # 等待下一个tick的时间间隔
-                if i < len(self.tick_df) - 1:
-                    interval = row.get("_interval", 0.0)
-                    if interval > 0:
-                        time.sleep(interval)
+                # 快速回放：不等待时间间隔
+                # if i < len(self.tick_df) - 1:
+                #     interval = row.get("_interval", 0.0)
+                #     if interval > 0:
+                #         time.sleep(interval)
             
             print(f"\n模拟回放完成: {self.symbol}, 共回放 {len(self.tick_df)} 条数据")
             
@@ -300,8 +300,10 @@ class GridStrategy(CtaTemplate):
         self.engine: Optional[GridEngine] = None
         self.pos_book = PositionBook()
         
-        # 报告器（需要从 setting 中获取 out_dir）
-        out_dir = setting.get("out_dir", "data/grid")
+        # 报告器（保存到策略目录）
+        import os
+        strategy_dir = os.path.dirname(os.path.abspath(__file__))
+        out_dir = os.path.join(strategy_dir, "trading_records")
         self.reporter = Reporter(out_dir=out_dir, symbol=vt_symbol)
         
         # 状态变量
@@ -334,15 +336,95 @@ class GridStrategy(CtaTemplate):
         # 输出日终报告
         if self.spec and self.engine:
             now = datetime.now()
-            self.reporter.flush_end_of_day(
-                now,
-                self.pos_book.snapshot(),
-                self.spec.level_price
-            )
-            self.write_log("日终报告已输出")
+            self.write_log(f"开始输出日终报告到: {self.reporter.out_dir}")
+            try:
+                self.reporter.flush_end_of_day(
+                    now,
+                    self.pos_book.snapshot(),
+                    self.spec.level_price
+                )
+                self.write_log("日终报告已输出")
+            except Exception as e:
+                self.write_log(f"输出日终报告失败: {e}")
+                import traceback
+                traceback.print_exc()
+            
+            # 打印交易记录到控制台
+            self._print_trading_records()
+    
+    def _print_trading_records(self) -> None:
+        """打印交易记录到控制台"""
+        try:
+            import os
+            strategy_dir = os.path.dirname(os.path.abspath(__file__))
+            out_dir = os.path.join(strategy_dir, "trading_records")
+            symbol_clean = self.vt_symbol.replace(".", "")
+            today = datetime.now().strftime("%Y%m%d")
+            day_dir = os.path.join(out_dir, symbol_clean, today)
+            
+            print("\n" + "="*60)
+            print("📊 交易记录汇总")
+            print("="*60)
+            
+            # 打印交易记录
+            trades_path = os.path.join(day_dir, "trades.csv")
+            if os.path.exists(trades_path):
+                print("\n📋 交易记录:")
+                with open(trades_path, "r", encoding="utf-8") as f:
+                    lines = f.readlines()
+                    if len(lines) > 1:  # 有数据
+                        for line in lines:
+                            print(f"  {line.strip()}")
+                    else:
+                        print("  (无交易记录)")
+            else:
+                print("\n📋 交易记录: (文件不存在)")
+            
+            # 打印配对交易
+            pairs_path = os.path.join(day_dir, "pairs.csv")
+            if os.path.exists(pairs_path):
+                print("\n🔄 配对交易:")
+                with open(pairs_path, "r", encoding="utf-8") as f:
+                    lines = f.readlines()
+                    if len(lines) > 1:  # 有数据
+                        for line in lines:
+                            print(f"  {line.strip()}")
+                    else:
+                        print("  (无配对交易)")
+            else:
+                print("\n🔄 配对交易: (文件不存在)")
+            
+            # 打印盈亏汇总
+            pnl_path = os.path.join(day_dir, "pnl.csv")
+            if os.path.exists(pnl_path):
+                print("\n💰 盈亏汇总:")
+                with open(pnl_path, "r", encoding="utf-8") as f:
+                    lines = f.readlines()
+                    for line in lines:
+                        print(f"  {line.strip()}")
+            else:
+                print("\n💰 盈亏汇总: (文件不存在)")
+            
+            # 打印当前仓位
+            positions_path = os.path.join(day_dir, "positions.csv")
+            if os.path.exists(positions_path):
+                print("\n📈 当前仓位:")
+                with open(positions_path, "r", encoding="utf-8") as f:
+                    lines = f.readlines()
+                    for line in lines:
+                        print(f"  {line.strip()}")
+            else:
+                print("\n📈 当前仓位: (文件不存在)")
+            
+            print("\n" + "="*60)
+            print(f"📁 交易记录文件位置: {day_dir}")
+            print("="*60)
+            
+        except Exception as e:
+            print(f"打印交易记录失败: {e}")
     
     def _init_grid(self, baseline: float) -> None:
-        """初始化网格"""
+        """初始化网格 - 修复版本"""
         self.spec = GridSpec(
             baseline=baseline,
             step=self.step,
@@ -355,13 +437,10 @@ class GridStrategy(CtaTemplate):
         self.write_log(f"Baseline={baseline:.6f}, Grid [{min_px:.6f}, {max_px:.6f}]")
         
         if not self._pos_loaded_from_text:
-            # 初始化：默认所有上网格都有仓位
-            qty = self.qty_per_fill
-            for level_idx in range(1, self.spec.max_level_index + 1):
-                # 使用baseline价格作为初始成本价
-                self.pos_book.set_holding(level_idx, baseline, qty)
-            
-            self.write_log(f"初始化完成：所有上网格(1到{self.spec.max_level_index})已设置仓位，每格{qty}股")
+            # 初始化：不预设任何仓位，等待价格触发
+            self.write_log("网格初始化完成：等待价格触发交易")
+        else:
+            self.write_log("网格初始化完成：已从历史文件加载仓位")
         self.initialized = True
     
     def _get_baseline_from_open(self, tick: TickData) -> Optional[float]:
@@ -375,18 +454,18 @@ class GridStrategy(CtaTemplate):
         处理网格层级事件
         
         新的买卖逻辑：
-        1. 若该网格已经发出订单且没有成交，则等待下一个价格
-        2. 若没有发出订单：
-           - 若当前价格网格或以下网格有仓位：卖出这些仓位总和；同时确保当前价格以下5个网格都有买入订单（买入成功时仓位挂在上一个网格）
-           - 否则：确保当前价格以下4个网格有买入订单，判断上一网格是否有仓位，若无且当前网格还没买入订单的，下买入订单
+        1、开盘之前有持仓，则在avg_cost位置挂卖出
+        2、若当前网格价已经发出订单且没有成交（不管是买还是卖），则等待下一个价格
+        3、若没有发出订单：
+           - 若当前价格网格或以下网格有仓位：卖出这些仓位总和；同时确保当前价格以下5个网格都有买入订单；买单成交时，记录avg_cost为买入价格+一个网格，同时在挂卖单在avg_cost
+           - 否则：确保当前价格以下4个网格有买入订单（没有要挂买单）；判断上一网格是否有仓位（在grid_positions判断），若无且当前网格还没挂买入订单的，挂买入订单
         """
         assert self.engine and self.spec
         qty = self.qty_per_fill
-        ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         
-        # 1) 若该网格已经发出订单且没有成交，则等待下一个价格
+        # 1) 检查是否已有挂单，避免重复操作
         if self._has_pending(level_index):
-            # 打印详细的未成交订单信息（可能同时存在BUY/SELL）
+            # 打印详细的未成交订单信息
             msgs = []
             for s in ("BUY", "SELL"):
                 key = (level_index, s)
@@ -401,57 +480,59 @@ class GridStrategy(CtaTemplate):
                         msgs.append(f"{s} | 价格: {px0:.6f} | 数量: {qty0}")
             detail = "；".join(msgs) if msgs else ""
             self.write_log(f"层级 {level_index} 已有订单未成交，等待下一个价格{(' ｜ ' + detail) if detail else ''}")
+            
+            # 打印当前所有挂单状态汇总
+            self._print_pending_orders_summary()
             return
         
-        # 2) 检查当前价格网格或以下网格是否有仓位
-        total_qty_below = 0
-        levels_with_pos = []
-        for idx in range(self.spec.min_level_index, level_index + 1):
-            pos = self.pos_book.get(idx)
+        # 2) 检查当前网格及以下网格的仓位情况
+        total_position_below = 0
+        has_position_at_or_below = False
+        
+        for i in range(self.spec.min_level_index, level_index + 1):
+            pos = self.pos_book.get(i)
             if pos.qty > 0:
-                total_qty_below += pos.qty
-                levels_with_pos.append(idx)
+                has_position_at_or_below = True
+                total_position_below += pos.qty
         
-        if total_qty_below > 0:
-            # 有仓位：挂卖单卖出这些仓位
-            for idx in levels_with_pos:
-                pos = self.pos_book.get(idx)
-                sell_qty = pos.qty
-                if sell_qty > 0 and not self._has_pending(idx, "SELL"):
-                    price = self.spec.level_price(idx)
-                    self._place_order_real(idx, "SELL", sell_qty, price)
-                    self._mark_pending(idx, "SELL", sell_qty, price)
-                    self.write_log(f"挂单: SELL | 层级: {idx} | 数量: {sell_qty}")
+        # 3) 根据仓位情况决定操作
+        if has_position_at_or_below:
+            # 有仓位：卖出这些仓位总和
+            if not self._has_pending(level_index, "SELL"):
+                sell_qty = total_position_below
+                grid_price = self.spec.level_price(level_index)
+                # 卖出时挂高一点，避免主动成交
+                sell_price = grid_price #+ 0.001  # 挂高0.001等待被动成交
+                
+                # 价格保护：检查是否超出合理范围
+                if sell_price > grid_price * 1.1:  # 防止挂价过高
+                    sell_price = grid_price + 0.0005  # 减小挂价幅度
+                    
+                self._place_order_real(level_index, "SELL", sell_qty, sell_price)
+                self._mark_pending(level_index, "SELL", sell_qty, sell_price)
         else:
-            # 无仓位：判断上一网格是否已经有仓位，若无且当前网格还没买入订单的，下买入订单
-            up_idx = level_index + 1
-            if up_idx <= self.spec.max_level_index:
-                up_pos = self.pos_book.get(up_idx)
-                if up_pos.qty <= 0 and not self._has_pending(level_index, "BUY"):
-                    price = self.spec.level_price(level_index)
-                    self._place_order_real(level_index, "BUY", qty, price)
-                    self._mark_pending(level_index, "BUY", qty, price)
-                    self.write_log(f"挂单: BUY | 层级: {level_index} | 数量: {qty}")
-        
-        # 每个价格时刻都确保挂单（不依赖是否有仓位）
-        # 确保当前价格及以上5个网格（共5个网格：level_index 到 level_index+4）都有卖出订单
-        for idx in range(level_index, min(self.spec.max_level_index + 1, level_index + 3)):
-            pos = self.pos_book.get(idx)
-            if pos.qty > 0 and not self._has_pending(idx, "SELL"):
-                price = self.spec.level_price(idx)
-                self._place_order_real(idx, "SELL", pos.qty, price)
-                self._mark_pending(idx, "SELL", pos.qty, price)
-                self.write_log(f"挂单: SELL | 层级: {idx} | 数量: {pos.qty}")
-        
-        # 确保当前价格以下5个网格都有买入订单（买入成功时仓位挂在上一个网格）
-        for idx in range(max(self.spec.min_level_index, level_index - 5), level_index):
-            if not self._has_pending(idx, "BUY"):
-                self._place_order_real(idx, "BUY", qty, self.spec.level_price(idx))
-                price = self.spec.level_price(idx)
-                self._mark_pending(idx, "BUY", qty, price)
-                self.write_log(f"挂单: BUY | 层级: {idx} | 数量: {qty} (买入成功时仓位挂在上一个网格)")
-        
-        # 3) 成交由实盘回调驱动；不做本地撮合
+            # 无仓位：买入逻辑
+            # 检查上一网格是否有仓位
+            prev_level_pos = self.pos_book.get(level_index - 1)
+            
+            # 确保当前价格以下4个网格有买入订单
+            for i in range(max(self.spec.min_level_index, level_index - 4), level_index):
+                if not self._has_pending(i, "BUY"):
+                    grid_price_i = self.spec.level_price(i)
+                    buy_price_i = grid_price_i #- 0.001
+                    if buy_price_i < grid_price_i * 0.9:
+                        buy_price_i = grid_price_i - 0.0005
+                    self._place_order_real(i, "BUY", qty, buy_price_i)
+                    self._mark_pending(i, "BUY", qty, buy_price_i)
+            
+            # 判断上一网格是否有仓位，若无且当前网格还没挂买入订单的，挂买入订单
+            if (prev_level_pos.qty <= 0 and not self._has_pending(level_index, "BUY")):
+                grid_price = self.spec.level_price(level_index)
+                buy_price = grid_price #- 0.001
+                if buy_price < grid_price * 0.9:
+                    buy_price = grid_price - 0.0005
+                self._place_order_real(level_index, "BUY", qty, buy_price)
+                self._mark_pending(level_index, "BUY", qty, buy_price)
         
         # 4) 成交由实盘回调驱动；不做本地撮合
     
@@ -459,6 +540,10 @@ class GridStrategy(CtaTemplate):
         """Tick数据更新时的回调函数（推送模式）"""
         try:
             now = datetime.now()
+            
+            # 定期清理过期挂单状态（每5分钟清理一次）
+            if now.minute % 5 == 0 and now.second < 5:
+                self._cleanup_old_pending_orders()
             
             # 检查是否在交易时段（模拟模式下跳过此检查）
             if not self._simulate_mode and not within_trading_window(now):
@@ -519,13 +604,100 @@ class GridStrategy(CtaTemplate):
                 grid_price = self.spec.level_price(lvl_idx)
                 self._handle_level_event(lvl_idx, grid_price, current_price)
             
-            # 不进行本地撮合；等待实盘回调
+            # 模拟模式下进行撮合，实盘模式等待回调
+            if self._simulate_mode:
+                self._simulate_matching(current_price)
+            # 实盘模式不进行本地撮合，等待实盘回调
             
             self.put_event()
             
         except Exception as e:
             self.write_log(f"处理tick数据失败: {e}")
             traceback.print_exc()
+    
+    def _simulate_matching(self, current_price: float) -> None:
+        """模拟撮合：检查挂单是否应该成交"""
+        try:
+            # 复制一份挂单详情，避免在迭代过程中修改
+            pending_to_check = list(self._pending_orders.copy())
+            
+            for key in pending_to_check:
+                level_index, side = key
+                if key not in self._pending_details:
+                    continue
+                    
+                detail = self._pending_details[key]
+                order_price = detail.get("price", 0)
+                order_qty = detail.get("qty", 0)
+                
+                if order_price <= 0 or order_qty <= 0:
+                    continue
+                
+                # 检查是否应该成交
+                should_fill = False
+                
+                if side == "BUY":
+                    # 买单：当前价格 <= 订单价格时成交
+                    if current_price <= order_price:
+                        should_fill = True
+                else:  # SELL
+                    # 卖单：当前价格 >= 订单价格时成交
+                    if current_price >= order_price:
+                        should_fill = True
+                
+                if should_fill:
+                    # 模拟成交
+                    self._simulate_order_fill(level_index, side, order_price, order_qty, current_price)
+                    
+        except Exception as e:
+            self.write_log(f"模拟撮合失败: {e}")
+    
+    def _simulate_order_fill(self, level_index: int, side: str, order_price: float, order_qty: int, fill_price: float) -> None:
+        """模拟订单成交"""
+        try:
+            # 生成模拟订单编号
+            order_id = int(datetime.now().timestamp() * 1000000) % 1000000000
+            
+            # 清除挂单状态
+            key = (level_index, side)
+            if key in self._pending_orders:
+                self._pending_orders.remove(key)
+            if key in self._pending_details:
+                del self._pending_details[key]
+            
+            # 更新仓位
+            if side == "BUY":
+                self.pos_book.buy_at_level(level_index, fill_price, order_qty)
+                self.write_log(f"模拟成交: BUY | 层级: {level_index} | 价格: {fill_price:.6f} | 数量: {order_qty} | 订单编号: {order_id}")
+            else:  # SELL
+                realized_qty = self.pos_book.sell_at_level(level_index, order_qty)
+                self.write_log(f"模拟成交: SELL | 层级: {level_index} | 价格: {fill_price:.6f} | 数量: {order_qty} | 订单编号: {order_id}")
+            
+            # 记录交易
+            tr = Trade(
+                trade_id=self._next_trade_id(),
+                order_id=order_id,
+                ts=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                side=side,
+                price=fill_price,
+                qty=order_qty,
+                level_index=level_index,
+            )
+            self.reporter.log_trade(tr)
+            
+            # 调用买入成交后的逻辑（如avg_cost挂卖单）
+            self.on_order_filled(level_index, side)
+            
+        except Exception as e:
+            self.write_log(f"模拟订单成交失败: {e}")
+    
+    def _next_trade_id(self) -> int:
+        """生成下一个交易ID"""
+        if not hasattr(self, '_trade_id_counter'):
+            self._trade_id_counter = 1
+        else:
+            self._trade_id_counter += 1
+        return self._trade_id_counter
     
     def on_bar(self, bar: BarData) -> None:
         """K线数据更新时的回调函数（网格策略主要使用tick数据）"""
@@ -543,21 +715,98 @@ class GridStrategy(CtaTemplate):
         self._order_placer = placer
 
     def _place_order_real(self, level_index: int, side: str, qty: int, price: float) -> None:
+        """真实下单函数 - 模拟模式下不执行"""
+        if self._simulate_mode:
+            self.write_log(f"模拟模式: 跳过真实下单 {side} | 层级: {level_index} | 价格: {price:.6f} | 数量: {qty}")
+            return
+            
         if self._order_placer is not None:
             self._order_placer(level_index, side, qty, price)
 
     def _mark_pending(self, level_index: int, side: str, qty: int, price: float, order_id: Optional[int] = None) -> None:
-        self._pending_orders.add((level_index, side))
-        self._pending_details[(level_index, side)] = {
+        """标记挂单状态 - 增强版本"""
+        key = (level_index, side)
+        self._pending_orders.add(key)
+        self._pending_details[key] = {
             "qty": qty,
             "price": price,
             "order_id": order_id,
+            "timestamp": datetime.now(),  # 添加时间戳
         }
-
+    
+    def _print_pending_orders_summary(self) -> None:
+        """打印当前挂单状态汇总"""
+        if not self._pending_orders:
+            self.write_log("当前无挂单")
+            return
+            
+        summary_lines = []
+        total_buy_qty = 0
+        total_sell_qty = 0
+        
+        # 按价格排序显示
+        pending_items = []
+        for (level_idx, side), details in self._pending_details.items():
+            if (level_idx, side) in self._pending_orders:
+                pending_items.append((level_idx, side, details))
+        
+        pending_items.sort(key=lambda x: x[2]['price'])  # 按价格排序
+        
+        for level_idx, side, details in pending_items:
+            price = details['price']
+            qty = details['qty']
+            order_id = details.get('order_id', 'N/A')
+            
+            if side == "BUY":
+                total_buy_qty += qty
+                summary_lines.append(f"  买入: 价格{price:.6f} 数量{qty} 层级{level_idx} 订单{order_id}")
+            else:
+                total_sell_qty += qty
+                summary_lines.append(f"  卖出: 价格{price:.6f} 数量{qty} 层级{level_idx} 订单{order_id}")
+        
+        summary_lines.insert(0, f"=== 当前挂单状态 (买入{total_buy_qty}股, 卖出{total_sell_qty}股) ===")
+        summary_lines.append("=== 挂单状态结束 ===")
+        
+        for line in summary_lines:
+            self.write_log(line)
+    
     def _has_pending(self, level_index: int, side: str | None = None) -> bool:
+        """检查是否有挂单 - 增强版本"""
         if side is None:
             return (level_index, "BUY") in self._pending_orders or (level_index, "SELL") in self._pending_orders
         return (level_index, side) in self._pending_orders
+    
+    def _clear_pending(self, level_index: int, side: str | None = None) -> None:
+        """清除挂单状态 - 新增方法"""
+        if side is None:
+            # 清除该网格的所有挂单
+            keys_to_remove = [key for key in self._pending_orders if key[0] == level_index]
+            for key in keys_to_remove:
+                self._pending_orders.remove(key)
+                if key in self._pending_details:
+                    del self._pending_details[key]
+        else:
+            # 清除特定方向的挂单
+            key = (level_index, side)
+            if key in self._pending_orders:
+                self._pending_orders.remove(key)
+                if key in self._pending_details:
+                    del self._pending_details[key]
+    
+    def _cleanup_old_pending_orders(self, max_age_minutes: int = 30) -> None:
+        """清理过期的挂单状态 - 新增方法"""
+        now = datetime.now()
+        keys_to_remove = []
+        
+        for key, details in self._pending_details.items():
+            timestamp = details.get("timestamp")
+            if timestamp and (now - timestamp).total_seconds() > max_age_minutes * 60:
+                keys_to_remove.append(key)
+        
+        for key in keys_to_remove:
+            self._pending_orders.remove(key)
+            del self._pending_details[key]
+            self.write_log(f"清理过期挂单状态: 层级 {key[0]}, 方向 {key[1]}")
 
     def on_order_placed(self, level_index: int, side: str, qty: int, price: float, order_id: int) -> None:
         # 更新/补全订单编号，并打印挂单成功日志
@@ -566,14 +815,50 @@ class GridStrategy(CtaTemplate):
             "price": price,
             "order_id": order_id,
         }
-        self.write_log(f"挂单成功: {side} | 层级: {level_index} | 价格: {price:.6f} | 数量: {qty} | 订单编号: {order_id}")
+        # 获取网格价用于日志显示
+        if self.strategy and self.strategy.spec:
+            grid_price = self.strategy.spec.level_price(level_index)
+            self.write_log(f"挂单成功: {side} | 层级: {level_index} | 网格价: {grid_price:.6f} | 挂单价: {price:.6f} | 数量: {qty} | 订单编号: {order_id}")
+        else:
+            self.write_log(f"挂单成功: {side} | 层级: {level_index} | 价格: {price:.6f} | 数量: {qty} | 订单编号: {order_id}")
 
     def on_order_filled(self, level_index: int, side: str) -> None:
+        """订单成交回调 - 修复版本"""
         try:
-            if (level_index, side) in self._pending_orders:
-                self._pending_orders.remove((level_index, side))
-        except Exception:
-            pass
+            key = (level_index, side)
+            # 清除挂单状态和详细信息
+            if key in self._pending_orders:
+                self._pending_orders.remove(key)
+            if key in self._pending_details:
+                del self._pending_details[key]
+            
+            # 买入成交时，记录avg_cost为买入价格+一个网格，同时在avg_cost挂卖单
+            if side == "BUY":
+                # 获取买入成交价格
+                pos = self.pos_book.get(level_index)
+                if pos and pos.avg_cost > 0:
+                    # 计算新的avg_cost：买入价格+一个网格
+                    buy_price = pos.avg_cost  # 这里应该是成交价格，但pos_book中存储的是avg_cost
+                    new_avg_cost = buy_price + self.spec.step
+                    
+                    # 找到avg_cost对应的网格层级
+                    avg_cost_level = int(round((new_avg_cost - self.spec.baseline) / self.spec.step))
+                    
+                    # 确保在网格范围内
+                    if self.spec.min_level_index <= avg_cost_level <= self.spec.max_level_index:
+                        # 在avg_cost位置挂卖单
+                        if not self._has_pending(avg_cost_level, "SELL"):
+                            sell_qty = pos.qty  # 卖出相同数量
+                            sell_price = new_avg_cost  # 在avg_cost位置卖出
+                            
+                            self._place_order_real(avg_cost_level, "SELL", sell_qty, sell_price)
+                            self._mark_pending(avg_cost_level, "SELL", sell_qty, sell_price)
+                            
+                            self.write_log(f"买入成交后在avg_cost挂卖单: 层级{avg_cost_level} | 价格{sell_price:.6f} | 数量{sell_qty}")
+            
+            self.write_log(f"订单成交: {side} | 层级: {level_index} | 挂单状态已清除")
+        except Exception as e:
+            self.write_log(f"清除挂单状态失败: {e}")
 
 
 class GridStrategyManager:
@@ -808,6 +1093,7 @@ class GridStrategyManager:
                     order_id_int = int(order_id_raw) if order_id_raw is not None else None
                 except Exception:
                     order_id_int = None
+                
                 traded_price = float(event.get("traded_price", 0))
                 traded_volume = int(event.get("traded_volume", 0))
                 meta = None
@@ -815,18 +1101,17 @@ class GridStrategyManager:
                     meta = self._order_map.pop(order_id_int, None)
                 if meta is None and order_id_str is not None:
                     meta = self._order_map.pop(order_id_str, None)
+                
+                # 如果找不到订单元数据，跳过处理（可能是历史成交）
                 if not meta or self.strategy is None or self.strategy.spec is None:
                     return
                 level_index = meta["level_index"]
                 side = meta["side"]
                 ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 if side == "BUY":
-                    target_level = level_index + 1
-                    if target_level <= self.strategy.spec.max_level_index:
-                        self.strategy.pos_book.buy_at_level(target_level, traded_price, traded_volume)
-                    else:
-                        self.strategy.pos_book.buy_at_level(level_index, traded_price, traded_volume)
-                
+                    # 买入成交：仓位挂在当前网格（修复：原来错误地挂在上一个网格）
+                    self.strategy.pos_book.buy_at_level(level_index, traded_price, traded_volume)
+                    
                     tr = Trade(
                         trade_id=self._next_trade_id(),
                         order_id=int(order_id_int) if order_id_int is not None else int(order_id_str) if order_id_str and order_id_str.isdigit() else 0,
@@ -1218,13 +1503,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--simulate",
         action=argparse.BooleanOptionalAction,
-        default=False,
+        default=True,
         help="启用模拟模式：使用历史tick数据回放进行调试（非交易时间可用）",
     )
     parser.add_argument(
         "--simulate-date",
         type=str,
-        default=None,
+        default='20260227',
         help="模拟模式下的日期，格式如 '20251112'，如果未指定则使用今天",
     )
     parser.add_argument(
@@ -1273,10 +1558,13 @@ def main(argv: list[str] | None = None) -> int:
     try:
         # 保持运行，等待数据推送
         while True:
-            time.sleep(1)
+            time.sleep(0.1)  # 减少等待时间
             # 如果是模拟模式，检查回放是否完成
             if args.simulate and manager.mock_replayer and not manager.mock_replayer.is_running():
                 print("\n模拟回放已完成，程序将退出")
+                # 调用策略停止方法以输出交易记录
+                if manager.strategy:
+                    manager.strategy.on_stop()
                 break
     except KeyboardInterrupt:
         print("\n\n收到停止信号，正在取消订阅/停止回放...")

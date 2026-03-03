@@ -28,7 +28,7 @@ except ImportError as e:
     print(f"当前sys.path: {sys.path}")
     sys.exit(1)
 
-@shelve_me_hour
+#@shelve_me_hour
 def get_date_range():
     """
     获取数据查询的日期范围
@@ -49,7 +49,7 @@ def get_date_range():
     
     if is_trading_day:
         # 今天是交易日
-        if current_hour >= 21:
+        if current_hour >= 19:
             # 21点之后，使用当天日期
             end_date = today_str
             reason = "今天是交易日且已过21点"

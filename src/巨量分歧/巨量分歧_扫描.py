@@ -87,7 +87,8 @@ def _filter_massive_divergence(
     """
     筛选巨量分歧：最近一根K线的成交额 > 成交额均线的 ratio 倍。
     1) 对45天以内检测
-    2) K线的成交额 > 成交额均线的 ratio 倍，且这个K线是5天内的第一根符合条件的K线
+    2) K线的成交额 > 成交额均线的 ratio 倍
+    3) 45天内最大涨幅不超过40%
     
     Args:
         df: 股票K线数据
@@ -105,10 +106,17 @@ def _filter_massive_divergence(
     
     # 只在最近45天内寻找符合条件的K线
     recent_45_days = df.tail(45)
-    # 进一步限制为最近5天内，找到第一根符合条件的K线
-    recent_5_days = recent_45_days.tail(5)
     
-    for idx, row in recent_5_days.iterrows():
+    # 检查45天内最大涨幅不超过40%
+    if len(recent_45_days) >= 2:
+        max_close = recent_45_days["close"].max()
+        min_close = recent_45_days["close"].min()
+        max_increase = (max_close - min_close) / min_close * 100
+        if max_increase > 30:
+            return None
+    
+    # 在45天内寻找符合巨量分歧条件的K线（从最新开始找）
+    for idx, row in recent_45_days.iterrows():
         ma_val = row.get("ma_amount", np.nan)
         last_amt = row.get("amount", np.nan)
         

@@ -53,11 +53,14 @@ class GridEngine:
         if price is None:
             return None
         step = self.spec.step
-        # 判断是否与某个网格价位几乎相等（浮点容差）
+        # 判断是否与某个网格价位几乎相等（使用更合理的容差）
         nearest_idx_float = (price - self.spec.baseline) / step
         nearest_idx = int(round(nearest_idx_float))
         px_at_idx = self.spec.level_price(nearest_idx)
-        if abs(px_at_idx - price) <= max(step, 1e-6) * 1e-6:
+        # 使用步长的10%作为容差，最小1e-4
+        tolerance = max(step * 0.1, 1e-4)
+        
+        if abs(px_at_idx - price) <= tolerance:
             if self.spec.min_level_index <= nearest_idx <= self.spec.max_level_index:
                 return nearest_idx
         return None
@@ -88,8 +91,8 @@ class GridEngine:
         last_price = self._last_price
         self._last_price = current_price
 
-        # 同价或未跨越
-        if current_price == last_price:
+        # 同价或未跨越 - 使用容差比较
+        if abs(current_price - last_price) < 1e-6:
             idx = self.price_to_level_index(current_price)
             if idx is not None:
                 crossed.append(idx)
