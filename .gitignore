@@ -41,7 +41,7 @@ venv.bak/
 .ipynb_checkpoints
 
 # Data files (large files that shouldn't be in git)
-*.csv
+# *.csv
 *.xlsx
 *.xls
 *.parquet

@@ -1,0 +1,2 @@
+trade_id,order_id,ts,side,price,qty,level_idx
+1,1098939089,2026-03-02 09:25:01,SELL,0.888000,200,2

@@ -209,6 +209,7 @@ class MockTickReplayer:
             "open": float(row.get("open", row.get("price", 0.0))),
             "high": float(row.get("high", row.get("price", 0.0))),
             "low": float(row.get("low", row.get("price", 0.0))),
+            "servertime": row.get("servertime", ""),  # 添加原始时间字段
         }
         return tick_dict
     
@@ -606,7 +607,12 @@ class GridStrategy(CtaTemplate):
             
             # 模拟模式下进行撮合，实盘模式等待回调
             if self._simulate_mode:
-                self._simulate_matching(current_price)
+                # 获取tick时间 - 优先使用tick.datetime，否则使用当前时间
+                if hasattr(tick, 'datetime') and tick.datetime:
+                    tick_time = tick.datetime.strftime("%Y-%m-%d %H:%M:%S")
+                else:
+                    tick_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                self._simulate_matching(current_price, tick_time)
             # 实盘模式不进行本地撮合，等待实盘回调
             
             self.put_event()
@@ -615,8 +621,8 @@ class GridStrategy(CtaTemplate):
             self.write_log(f"处理tick数据失败: {e}")
             traceback.print_exc()
     
-    def _simulate_matching(self, current_price: float) -> None:
-        """模拟撮合：检查挂单是否应该成交"""
+    def _simulate_matching(self, current_price: float, tick_time: str) -> None:
+        """模拟撮合 - 使用tick原始时间"""
         try:
             # 复制一份挂单详情，避免在迭代过程中修改
             pending_to_check = list(self._pending_orders.copy())
@@ -646,13 +652,13 @@ class GridStrategy(CtaTemplate):
                         should_fill = True
                 
                 if should_fill:
-                    # 模拟成交
-                    self._simulate_order_fill(level_index, side, order_price, order_qty, current_price)
+                    # 模拟成交 - 传递tick时间
+                    self._simulate_order_fill(level_index, side, order_price, order_qty, current_price, tick_time)
                     
         except Exception as e:
             self.write_log(f"模拟撮合失败: {e}")
     
-    def _simulate_order_fill(self, level_index: int, side: str, order_price: float, order_qty: int, fill_price: float) -> None:
+    def _simulate_order_fill(self, level_index: int, side: str, order_price: float, order_qty: int, fill_price: float, tick_time: str) -> None:
         """模拟订单成交"""
         try:
             # 生成模拟订单编号
@@ -673,11 +679,11 @@ class GridStrategy(CtaTemplate):
                 realized_qty = self.pos_book.sell_at_level(level_index, order_qty)
                 self.write_log(f"模拟成交: SELL | 层级: {level_index} | 价格: {fill_price:.6f} | 数量: {order_qty} | 订单编号: {order_id}")
             
-            # 记录交易
+            # 记录交易 - 使用tick原始时间
             tr = Trade(
                 trade_id=self._next_trade_id(),
                 order_id=order_id,
-                ts=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                ts=tick_time,  # 使用tick原始时间
                 side=side,
                 price=fill_price,
                 qty=order_qty,
@@ -919,8 +925,23 @@ class GridStrategyManager:
             TickData 对象，如果转换失败返回 None
         """
         try:
-            # 获取当前时间
-            now = datetime.now()
+            # 获取tick原始时间 - 优先使用servertime字段
+            servertime = tick_data.get('servertime', '')
+            if servertime:
+                # 解析servertime为datetime
+                if isinstance(servertime, str):
+                    # 尝试解析时间格式
+                    try:
+                        tick_time = datetime.strptime(servertime, '%Y-%m-%d %H:%M:%S')
+                    except ValueError:
+                        try:
+                            tick_time = datetime.strptime(servertime, '%Y%m%d %H:%M:%S')
+                        except ValueError:
+                            tick_time = datetime.now()
+                else:
+                    tick_time = datetime.now()
+            else:
+                tick_time = datetime.now()
             
             # 从 tick_data 中提取字段
             last_price = tick_data.get('lastPrice', 0.0)
@@ -938,11 +959,11 @@ class GridStrategyManager:
             # 根据股票代码判断交易所
             exchange = get_exchange_from_code(stock_code)
             
-            # 创建 TickData 对象
+            # 创建 TickData 对象 - 使用tick原始时间
             tick = TickData(
                 symbol=stock_code.split('.')[0],
                 exchange=exchange,
-                datetime=now,
+                datetime=tick_time,  # 使用tick原始时间
                 name=stock_code,
                 volume=volume,
                 open_interest=0.0,
@@ -1313,7 +1334,7 @@ class GridStrategyManager:
             # 加载历史tick数据
             raw_df = _load_tick_raw_dataframe(self.stock_code, start_time)
             
-            if raw_df.empty:
+            if raw_df is None or len(raw_df) == 0:
                 print(f"警告: 无法加载历史tick数据，日期: {date_str}")
                 return None
             
