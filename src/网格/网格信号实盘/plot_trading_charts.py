@@ -13,7 +13,7 @@ import os
 plt.rcParams['font.sans-serif'] = ['SimHei', 'Microsoft YaHei']
 plt.rcParams['axes.unicode_minus'] = False
 
-def plot_trading_charts(symbol="162411SZ", date=None):
+def plot_trading_charts(symbol="513030SH", date=None):
     """绘制交易图表"""
     
     # 交易记录文件路径
