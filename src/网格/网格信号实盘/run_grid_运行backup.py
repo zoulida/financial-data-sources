@@ -97,15 +97,15 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Run grid strategy with vnpy framework")
     parser.add_argument("--symbol", default="162411.SZ", help="股票代码")
     parser.add_argument("--step", type=float, default=0.001, help="网格步长")
-    parser.add_argument("--up_grids", type=int, default=50, help="向上网格数")
-    parser.add_argument("--down_grids", type=int, default=100, help="向下网格数")
+    parser.add_argument("--up_grids", type=int, default=10, help="向上网格数")
+    parser.add_argument("--down_grids", type=int, default=30, help="向下网格数")
     parser.add_argument("--lot_per_grid", type=int, default=1, help="每格手数")
     parser.add_argument("--hand_size", type=int, default=100, help="每手股数")
     parser.add_argument("--out_dir", default="data/grid", help="输出目录")
     parser.add_argument(
         "--baseline",
         type=float,
-        default=0.941,
+        default=0.992,
         help="若提供则使用该基准价（例如 0.680）；否则用9:30开盘价",
     )
     parser.add_argument(

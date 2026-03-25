@@ -271,6 +271,9 @@ class GridStrategyManager:
         def on_filled(event: Dict[str, Any]):
             try:
                 order_id_raw = event.get("order_id", None)
+                traded_price = float(event.get("traded_price", 0))
+                traded_volume = int(event.get("traded_volume", 0))
+                print(f"[DEBUG on_filled] 收到成交回调: order_id={order_id_raw}, price={traded_price}, volume={traded_volume}")
                 # 兼容字符串/整数订单编号
                 order_id_str = str(order_id_raw) if order_id_raw is not None else None
                 try:
@@ -287,7 +290,14 @@ class GridStrategyManager:
                     meta = self._order_map.pop(order_id_str, None)
                 
                 # 如果找不到订单元数据，跳过处理（可能是历史成交）
-                if not meta or self.strategy is None or self.strategy.spec is None:
+                if not meta:
+                    print(f"[DEBUG on_filled] 找不到订单元数据: order_id={order_id_raw}, map_keys={list(self._order_map.keys())[:5]}...")
+                    return
+                if self.strategy is None:
+                    print(f"[DEBUG on_filled] strategy为None")
+                    return
+                if self.strategy.spec is None:
+                    print(f"[DEBUG on_filled] strategy.spec为None")
                     return
                 level_index = meta["level_index"]
                 side = meta["side"]
@@ -322,7 +332,15 @@ class GridStrategyManager:
                     self.strategy.trades.append(tr)
                 
                 # 调用策略的成交回调方法
-                self.strategy.on_order_filled(level_index, side)
+                print(f"[DEBUG on_filled] 准备调用 on_order_filled: level={level_index}, side={side}")
+                try:
+                    self.strategy.on_order_filled(level_index, side, traded_price, traded_volume)
+                    print(f"[DEBUG on_filled] on_order_filled 调用成功")
+                except Exception as e2:
+                    print(f"[DEBUG on_filled] on_order_filled 抛出异常: {e2}")
+                    import traceback
+                    traceback.print_exc()
+                    raise
                 
                 self._save_positions_to_text()
             except Exception:

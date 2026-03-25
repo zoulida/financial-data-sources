@@ -39,6 +39,7 @@ class BaseTraderCallback(XtQuantTraderCallback):
         self.connected = False
         
     def on_stock_order(self, order):
+        from datetime import datetime
         order_info = {
             'order_id': order.order_id,
             'stock_code': order.stock_code,
@@ -48,7 +49,8 @@ class BaseTraderCallback(XtQuantTraderCallback):
         }
         self.orders[order.order_id] = order_info
         status_desc = self._get_order_status_desc(order.order_status)
-        print(f"[Order] {order.stock_code} 状态={status_desc}({order.order_status}) 成交量={order.traded_volume}")
+        current_time = datetime.now().strftime("%H:%M:%S")
+        print(f"[Order] ID:{order.order_id} {order.stock_code} 状态={status_desc}({order.order_status}) 成交量={order.traded_volume} 价格={order.price:.6f} 时间={current_time} 方向={'BUY' if getattr(order, 'order_type', None) == 23 else 'SELL' if getattr(order, 'order_type', None) == 24 else 'UNKNOWN'}")
         
     def on_stock_trade(self, trade):
         trade_info = {
@@ -246,11 +248,14 @@ class BaseTrader:
                     'stock_code': position.stock_code,
                     'volume': position.volume,
                     'can_use_volume': getattr(position, 'can_use_volume', 0),
+                    'frozen_volume': getattr(position, 'frozen_volume', 0),
+                    'open_price': getattr(position, 'open_price', 0),
+                    'avg_price': getattr(position, 'avg_price', 0),
                     'market_value': getattr(position, 'market_value', 0)
                 }
                 positions_list.append(position_info)
                 
-        print(f"[BaseTrader] Found {len(positions_list)} positions")
+        # print(f"[BaseTrader] Found {len(positions_list)} positions")
         return positions_list
     
     def get_position(self, stock_code: str) -> Optional[Dict]:
@@ -266,19 +271,28 @@ class BaseTrader:
                 'stock_code': position.stock_code,
                 'volume': position.volume,
                 'can_use_volume': getattr(position, 'can_use_volume', 0),
+                'frozen_volume': getattr(position, 'frozen_volume', 0),
+                'open_price': getattr(position, 'open_price', 0),
+                'avg_price': getattr(position, 'avg_price', 0),
                 'market_value': getattr(position, 'market_value', 0)
             }
             return position_info
         else:
             return None
     
-    def get_unfilled_orders(self) -> List[Dict]:
-        """Query unfilled orders (orders that haven't been fully executed)"""
+    def query_stock_orders_raw(self) -> List:
+        """Query raw stock orders from broker (single API call)"""
         if not self._connected:
             print("[BaseTrader] Please connect first")
             return []
             
-        orders = self.xt_trader.query_stock_orders(self.stock_account)
+        return self.xt_trader.query_stock_orders(self.stock_account)
+    
+    def get_unfilled_orders(self, verbose: bool = True) -> List[Dict]:
+        """Query unfilled orders (orders that haven't been fully executed)"""
+        #print('开始调用self.query_stock_orders_raw()')
+        orders = self.query_stock_orders_raw()
+        #print("结束      了")
         unfilled_orders = []
         
         # Order status mapping based on 委托状态说明
@@ -304,7 +318,8 @@ class BaseTrader:
                     }
                     unfilled_orders.append(order_info)
                     
-        print(f"[BaseTrader] Found {len(unfilled_orders)} unfilled orders")
+        if verbose:
+            print(f"[BaseTrader] Found {len(unfilled_orders)} unfilled orders")
         return unfilled_orders
     
     def _get_order_status_desc(self, status_code: int) -> str:
