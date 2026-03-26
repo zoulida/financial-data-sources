@@ -259,7 +259,7 @@ class GridStrategy(CtaTemplate):
 
         # 添加调试日志
         grid_price = self.spec.level_price(current_level)
-        self.write_log(f"[DEBUG] 处理层级: {current_level} | 价格: {grid_price:.6f} | 当前价格: {current_price:.6f}")
+        # self.write_log(f"[DEBUG] 处理层级: {current_level} | 价格: {grid_price:.6f} | 当前价格: {current_price:.6f}")
 
         # 处理待挂卖单（在on_order_filled中记录的，避免在QMT回调线程中直接下单）
         self._process_pending_sell_orders()
@@ -273,7 +273,7 @@ class GridStrategy(CtaTemplate):
         # 3、若当前价格网格已有未成交订单（买或卖），等待下一个价格，直接返回
         has_pending_buy = self._has_pending(current_level, "BUY")
         has_pending_sell = self._has_pending(current_level, "SELL")
-        self.write_log(f"[DEBUG] 当前网格{current_level}挂单检查: 本地买单={has_pending_buy}, 本地卖单={has_pending_sell}")
+        # self.write_log(f"[DEBUG] 当前网格{current_level}挂单检查: 本地买单={has_pending_buy}, 本地卖单={has_pending_sell}")
         
         if has_pending_buy or has_pending_sell:
             self.write_log(f"当前价格网格 {current_level} 已有未成交订单，等待")
@@ -317,8 +317,7 @@ class GridStrategy(CtaTemplate):
                         # 有足够真实仓位，直接挂卖单
                         self.place_sell_order(target_level, qty, target_price)
                         self.write_log(f"处理待挂卖单成功: 买入层级{source_buy_level} | 成本{source_cost:.6f} | 卖出价{target_price:.6f} | 目标层级{target_level} | 数量{qty}")
-                    else:
-                        self.write_log(f"[DEBUG] 真实仓位不足，跳过挂卖单: 需要{qty}股, 真实仓位{real_qty}股")
+                    # else: 真实仓位不足，跳过
                 else:
                     # 无法获取真实仓位，使用本地仓位作为备选
                     print(' 无法获取真实仓位，使用本地仓位作为备选')
@@ -326,10 +325,9 @@ class GridStrategy(CtaTemplate):
                     if source_pos and source_pos.qty >= qty:
                         self.place_sell_order(target_level, qty, target_price)
                         self.write_log(f"处理待挂卖单成功(本地仓位): 买入层级{source_buy_level} | 成本{source_cost:.6f} | 卖出价{target_price:.6f} | 目标层级{target_level} | 数量{qty}")
-                    else:
-                        self.write_log(f"[DEBUG] 本地仓位不足，跳过挂卖单: 买入层级{source_buy_level}, 需要{qty}股, 可用{source_pos.qty if source_pos else 0}股")
+                    # else: 本地仓位不足，跳过
             except Exception as e:
-                self.write_log(f"[DEBUG] 获取真实仓位失败，跳过挂卖单: {e}")
+                pass  # 获取真实仓位失败，跳过
 
     # ========== 新的网格策略辅助方法 ==========
 
@@ -390,7 +388,7 @@ class GridStrategy(CtaTemplate):
                 self.place_sell_order(target_level, sell_qty, target_sell_price)
                 self.write_log(f"为持仓挂卖单: 持仓层级{level_idx} | 成本{pos.avg_cost:.6f} | 卖出价{target_sell_price:.6f} | 目标层级{target_level} | 数量{sell_qty}")
             else:
-                self.write_log(f"[DEBUG] 跳过重复挂卖单: 目标层级{target_level}, has_pending={has_pending_sell}, has_pending_to_place={has_pending_to_place}")
+                pass  # 跳过重复挂卖单
 
     def _ensure_buy_orders_below(self, current_level: int) -> None:
         """
@@ -414,25 +412,15 @@ class GridStrategy(CtaTemplate):
             #has_sell_above = has_pending_sell_above or has_real_sell_above
 
             # 添加调试日志
-            self.write_log(f"[DEBUG] 检查买入层级{i}: 价格{grid_price:.6f} | 本地挂单={has_pending} | 真实订单={has_real_order} | 上一网格卖单={has_real_sell_above}")
+            # self.write_log(f"[DEBUG] 检查买入层级{i}: 价格{grid_price:.6f} | 本地挂单={has_pending} | 真实订单={has_real_order} | 上一网格卖单={has_real_sell_above}")
 
             if not has_pending and not has_real_order and not has_real_sell_above:
                 # 检查最大持仓和资金
                 if self._can_place_buy_order(qty):
-                    self.write_log(f"[DEBUG] 准备挂买单: 层级{i} | 价格{grid_price:.6f} | 数量{qty}")
                     self.place_buy_order(i, qty, grid_price)
                     self.write_log(f"低4个网格挂买单: 层级{i} | 价格{grid_price:.6f} | 数量{qty}")
-                else:
-                    self.write_log(f"[DEBUG] 层级{i}无法挂买单: 资金或持仓限制")
-            else:
-                reasons = []
-                if has_pending:
-                    reasons.append("本地挂单")
-                if has_real_order:
-                    reasons.append("真实订单")
-                if has_real_sell_above:
-                    reasons.append("上一网格有卖单")
-                self.write_log(f"[DEBUG] 层级{i}跳过挂买单: {', '.join(reasons)}")
+                # else: 资金或持仓限制，跳过
+            # else: 有挂单或真实订单或上一网格有卖单，跳过
 
     def _place_buy_order_if_empty(self, current_level: int) -> None:
         """
@@ -458,7 +446,7 @@ class GridStrategy(CtaTemplate):
         # 检查上一网格（更高价格）是否有未成交卖单
         has_real_sell_above = self._has_real_sell_order_at_price(current_level + 1)
         
-        self.write_log(f"[DEBUG] 当前网格{current_level}检查: 当前仓位={current_qty}, 上一网格仓位={higher_qty}, 本地挂单={has_pending_buy}, 真实订单={has_real_buy}, 上一网格卖单={has_real_sell_above}")
+        # self.write_log(f"[DEBUG] 当前网格{current_level}检查: 当前仓位={current_qty}, 上一网格仓位={higher_qty}, 本地挂单={has_pending_buy}, 真实订单={has_real_buy}, 上一网格卖单={has_real_sell_above}")
 
         # 若当前价格网格与更高一网格都没有仓位，且上一网格没有卖单，挂买入订单
         if (current_pos.qty <= 0 and higher_pos.qty <= 0 and
@@ -472,21 +460,9 @@ class GridStrategy(CtaTemplate):
             if self._can_place_buy_order(qty):
                 self.place_buy_order(current_level, qty, grid_price)
                 self.write_log(f"当前网格挂买单: 层级{current_level} | 价格{grid_price:.6f} | 数量{qty}")
-            else:
-                self.write_log(f"[DEBUG] 当前网格{current_level}无法挂买单: 资金或持仓限制")
+            # else: 资金或持仓限制，跳过
         else:
-            reasons = []
-            if current_pos and current_pos.qty > 0:
-                reasons.append(f"当前网格有仓位{current_pos.qty}")
-            if higher_pos and higher_pos.qty > 0:
-                reasons.append(f"上一网格有仓位{higher_pos.qty}")
-            if has_pending_buy:
-                reasons.append("本地挂单")
-            if has_real_buy:
-                reasons.append("真实订单")
-            if has_real_sell_above:
-                reasons.append("上一网格有卖单")
-            self.write_log(f"[DEBUG] 当前网格{current_level}跳过挂买单: {', '.join(reasons)}")
+            pass  # 有仓位或挂单或卖单，跳过挂买单
 
     def _can_place_buy_order(self, qty: int) -> bool:
         """
@@ -873,26 +849,21 @@ class GridStrategy(CtaTemplate):
         try:
             # 直接通过trader查询真实订单，不使用缓存
             if not hasattr(self, 'manager') or not self.manager or not hasattr(self.manager, 'trader') or not self.manager.trader:
-                self.write_log(f"[DEBUG] 无trader实例，返回False")
                 return False
             
             # 直接调用get_unfilled_orders获取真实订单
             orders_list = self.manager.trader.get_unfilled_orders(verbose=False)
             if not orders_list:
-                self.write_log(f"[DEBUG] 无未成交订单，返回False")
                 return False
             
             target_price = self.spec.level_price(level_index)
             current_stock = self.manager.stock_code
             current_stock_clean = current_stock.replace('.SH', '').replace('.SZ', '')
             
-            self.write_log(f"[DEBUG] 检查层级{level_index}买单: 目标价格{target_price:.6f}, 订单数量{len(orders_list)}")
-            
             for order in orders_list:
                 stock_code = order.get('stock_code', '')
                 order_price = order.get('price', 0)
                 order_type = order.get('order_type')
-                order_id = order.get('order_id', 'N/A')
                 
                 # 检查是否为当前股票的买单
                 is_match_stock = (
@@ -908,17 +879,12 @@ class GridStrategy(CtaTemplate):
                 # 检查价格是否匹配（允许小幅差异）
                 price_match = abs(order_price - target_price) < 0.001
                 
-                self.write_log(f"[DEBUG] 订单{order_id}: 代码={stock_code}, 价格={order_price:.6f}, 类型={order_type}, 匹配股票={is_match_stock}, 买单={is_buy_order}, 价格匹配={price_match}")
-                
                 if is_match_stock and is_buy_order and price_match:
-                    self.write_log(f"[DEBUG] 找到匹配的买单: 订单{order_id}, 价格{order_price:.6f}")
                     return True
                     
-            self.write_log(f"[DEBUG] 未找到层级{level_index}的买单")
             return False
             
         except Exception as e:
-            self.write_log(f"[DEBUG] 检查真实买单时出错: {e}")
             return False
     
     def _has_pending(self, level_index: int, side: str | None = None) -> bool:
@@ -935,9 +901,7 @@ class GridStrategy(CtaTemplate):
                 return False
             
             # 直接调用get_unfilled_orders获取真实订单
-            #print('准备调用 get_unfilled_orders...')
             orders_list = self.manager.trader.get_unfilled_orders(verbose=False)
-            print(f'get_unfilled_orders 返回，订单数量: {len(orders_list) if orders_list else 0}')
             if not orders_list:
                 return False
             
@@ -945,14 +909,10 @@ class GridStrategy(CtaTemplate):
             current_stock = self.manager.stock_code
             current_stock_clean = current_stock.replace('.SH', '').replace('.SZ', '')
             
-            self.write_log(f"[DEBUG] 开始检查层级{level_index}的卖单: 目标价格={target_price:.6f}")
-            self.write_log(f"[DEBUG] 层级{level_index}对应价格计算: baseline={self.spec.baseline:.6f}, step={self.spec.step:.6f}, level_price={target_price:.6f}")
-            
             for order in orders_list:
                 stock_code = order.get('stock_code', '')
                 order_price = order.get('price', 0)
                 order_type = order.get('order_type')
-                order_id = order.get('order_id', 'N/A')
                 
                 # 检查是否为当前股票的订单
                 is_match_stock = (
@@ -971,17 +931,12 @@ class GridStrategy(CtaTemplate):
                 # 检查价格是否匹配（允许小幅差异）
                 price_match = abs(order_price - target_price) < 0.001
                 
-                self.write_log(f"[DEBUG] 卖单检查{level_index}: 订单{order_id}, 价格={order_price:.6f}, 目标={target_price:.6f}, 类型={order_type}, 匹配股票={is_match_stock}, 卖单={is_sell_order}, 价格匹配={price_match}")
-                
-                if is_match_stock and is_sell_order and price_match:
-                    self.write_log(f"[DEBUG] 找到匹配的卖单: 订单{order_id}, 价格{order_price:.6f}")
+                if is_sell_order and price_match:
                     return True
                     
-            self.write_log(f"[DEBUG] 未找到层级{level_index}的卖单")
             return False
             
         except Exception as e:
-            print(f"[GridStrategy] Error checking real sell order at price: {e}")
             return False
     
     def _clear_pending(self, level_index: int, side: str | None = None) -> None:

@@ -28,12 +28,14 @@
 from __future__ import annotations
 
 import argparse
+import atexit
+import io
+import sys
 import time
+from pathlib import Path
 from typing import Any, Dict
 
 # 导入拆分后的模块
-import sys
-from pathlib import Path
 
 # 添加项目根目录到sys.path
 project_root = Path(__file__).resolve().parent.parent.parent.parent
@@ -41,6 +43,60 @@ if str(project_root) not in sys.path:
     sys.path.append(str(project_root))
 
 from src.网格.网格信号实盘.strategy_manager import GridStrategyManager
+
+
+class ConsoleLogger:
+    """控制台日志记录器 - 固定大小写入，减少 I/O 频率"""
+    
+    FLUSH_SIZE = 4096  # 缓冲区达到 4KB 时写入文件
+    
+    def __init__(self, log_file: Path):
+        self.log_file = log_file
+        self.log_file.parent.mkdir(parents=True, exist_ok=True)
+        self.log_file_handle = open(log_file, 'w', encoding='utf-8')
+        self.original_stdout = sys.stdout
+        self.original_stderr = sys.stderr
+        self.buffer = []
+        self.buffer_size = 0
+    
+    def write(self, message: str) -> int:
+        # 输出到控制台
+        self.original_stdout.write(message)
+        self.original_stdout.flush()
+        
+        # 累积到缓冲区
+        self.buffer.append(message)
+        self.buffer_size += len(message)
+        
+        # 达到阈值时写入文件
+        if self.buffer_size >= self.FLUSH_SIZE:
+            self._flush_to_file()
+        
+        return len(message)
+    
+    def _flush_to_file(self) -> None:
+        """将缓冲区内容写入文件"""
+        if self.buffer:
+            self.log_file_handle.write(''.join(self.buffer))
+            self.log_file_handle.flush()
+            self.buffer.clear()
+            self.buffer_size = 0
+    
+    def flush(self) -> None:
+        self.original_stdout.flush()
+        self._flush_to_file()
+    
+    def close(self) -> None:
+        """关闭日志文件"""
+        self._flush_to_file()
+        self.log_file_handle.close()
+        self.original_stdout.write(f"\n日志已保存到: {self.log_file}\n")
+    
+    def install(self) -> None:
+        """安装日志记录器"""
+        sys.stdout = self
+        sys.stderr = self
+        atexit.register(self.close)
 
 
 def run_realtime_strategy() -> None:
@@ -94,6 +150,10 @@ def run_realtime_strategy() -> None:
 
 def main(argv: list[str] | None = None) -> int:
     """命令行入口"""
+    # 初始化控制台日志记录器
+    log_file = Path(__file__).parent / "logs" / "console.log"
+    logger = ConsoleLogger(log_file)
+    logger.install()
     parser = argparse.ArgumentParser(description="Run grid strategy with vnpy framework")
     parser.add_argument("--symbol", default="162411.SZ", help="股票代码")
     parser.add_argument("--step", type=float, default=0.001, help="网格步长")
