@@ -279,10 +279,11 @@ class GridStrategy(CtaTemplate):
         # self.write_log(f"[DEBUG] 处理层级: {current_level} | 价格: {grid_price:.6f} | 当前价格: {current_price:.6f}")
 
         # 处理待挂卖单（在on_order_filled中记录的，避免在QMT回调线程中直接下单）
-        self._process_pending_sell_orders()
+        #self._process_pending_sell_orders()
 
         # 1、检查本地持仓，为每个持仓在avg_cost+1网格位置挂卖单（如果没有的话）
-        self._place_sell_orders_for_positions()
+        # self._place_sell_orders_for_positions()  # 该方法已被 _place_sell_for_pending_positions 替代
+        pass
 
         # 2、确保当前价格网格以下4个网格有买入订单（不包含当前网格）
         self._ensure_buy_orders_below(current_level)
@@ -302,7 +303,7 @@ class GridStrategy(CtaTemplate):
         # 5、返回
         return
 
-    def _process_pending_sell_orders(self) -> None:
+    '''def _process_pending_sell_orders(self) -> None:#作废
         """
         处理待挂卖单（在on_order_filled中记录的，避免在QMT回调线程中直接下单）
         在_handle_level_event的L0步骤之前调用
@@ -346,7 +347,7 @@ class GridStrategy(CtaTemplate):
                         self.write_log(f"处理待挂卖单成功(本地仓位): 买入层级{source_buy_level} | 成本{source_cost:.6f} | 卖出价{target_price:.6f} | 目标层级{target_level} | 数量{qty}")
                     # else: 本地仓位不足，跳过
             except Exception as e:
-                pass  # 获取真实仓位失败，跳过
+                pass  # 获取真实仓位失败，跳过'''
 
     # ========== 新的网格策略辅助方法 ==========
 
@@ -779,7 +780,7 @@ class GridStrategy(CtaTemplate):
                         real_qty += pos.get('can_use_volume', 0)
                 
                 if real_qty > max_position:
-                    print(f"[错误] 券商可用仓位{real_qty}股已超过设定阈值{max_position}股，停止买入")
+                    print(f"[错误] 券商可用仓位{real_qty}股已超过设定阈值{max_position}股，停止买入++++++++")
                     return False
         except Exception as e:
             print(f"[警告] 获取券商仓位失败: {e}")
