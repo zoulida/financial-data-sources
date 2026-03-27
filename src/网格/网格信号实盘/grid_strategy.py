@@ -400,8 +400,8 @@ class GridStrategy(CtaTemplate):
             # 检查上一网格（价格高一厘）是否有未成交卖单
             has_real_sell_above = self._has_real_sell_order_at_price(i + 1)
 
-            # 增加调试日志，排查为什么没挂单
-            self.write_log(f"[DEBUG] 检查买入层级{i}: 价格{grid_price:.6f} | 本地挂单={has_pending} | 真实订单={has_real_order} | 高一厘卖单={has_real_sell_above}")
+            # 增加调试日志，排查为什么没挂单 - 暂时注释掉
+            # self.write_log(f"[DEBUG] 检查买入层级{i}: 价格{grid_price:.6f} | 本地挂单={has_pending} | 真实订单={has_real_order} | 高一厘卖单={has_real_sell_above}")
 
             if not has_pending and not has_real_order and not has_real_sell_above:
                 # 检查最大持仓和资金
@@ -576,7 +576,7 @@ class GridStrategy(CtaTemplate):
                 return
             
             # 打印当前价格
-            self.write_log(f"当前价格: {current_price:.6f}")
+            self.write_log(f"当前价格: {current_price:.6f}————————————————————————————————————————————————")
             
             # 越界处理/恢复
             crossed = self.engine.update_and_get_crossed_levels(current_price)
@@ -781,7 +781,23 @@ class GridStrategy(CtaTemplate):
                 
                 if real_qty > max_position:
                     print(f"[错误] 券商可用仓位{real_qty}股已超过设定阈值{max_position}股，停止买入++++++++")
+                    # 触发计数器
+                    if not hasattr(self, '_max_position_trigger_count'):
+                        self._max_position_trigger_count = 0
+                    self._max_position_trigger_count += 1
+                    print(f"[应急卖单] 触发次数: {self._max_position_trigger_count}/50")
+                    
+                    # 超过5次，创建应急卖单
+                    if self._max_position_trigger_count >= 50:
+                        self._create_emergency_sell_order()
+                        self._max_position_trigger_count = 0  # 重置计数器
+                    
                     return False
+                else:
+                    # 未触发，重置计数器
+                    if hasattr(self, '_max_position_trigger_count') and self._max_position_trigger_count > 0:
+                        self._max_position_trigger_count = 0
+                        print("[应急卖单] 触发条件解除，重置计数器")
         except Exception as e:
             print(f"[警告] 获取券商仓位失败: {e}")
         
@@ -1349,9 +1365,18 @@ class GridStrategy(CtaTemplate):
             if not self.spec:
                 continue
             
-            # 计算卖出价格 = 买入价 + 一个网格步长，并四舍五入保留3位小数
-            sell_price = round(entry.buy_price + self.spec.step, 3)
-            sell_level = int(round((sell_price - self.spec.baseline) / self.spec.step))
+            # 检查是否为应急卖单（sell_order_id以EMERGENCY_开头且已预定义卖出价格）
+            is_emergency = entry.sell_order_id and entry.sell_order_id.startswith("EMERGENCY_")
+            
+            if is_emergency and entry.sell_price is not None:
+                # 应急卖单：使用预定义的卖出价格和层级
+                sell_price = entry.sell_price
+                sell_level = entry.sell_level if entry.sell_level is not None else int(round((sell_price - self.spec.baseline) / self.spec.step))
+                self.write_log(f"[DEBUG] 应急卖单检测: 仓位ID={entry.entry_id} | 使用预定义卖价={sell_price:.6f} | 层级={sell_level}")
+            else:
+                # 普通仓位：计算卖出价格 = 买入价 + 一个网格步长，并四舍五入保留3位小数
+                sell_price = round(entry.buy_price + self.spec.step, 3)
+                sell_level = int(round((sell_price - self.spec.baseline) / self.spec.step))
             
             self.write_log(f"[DEBUG] 尝试为仓位挂卖单: 仓位ID={entry.entry_id} | 买入价={entry.buy_price:.6f} | 目标卖价={sell_price:.6f} | 目标层级={sell_level}")
             
@@ -1438,6 +1463,61 @@ class GridStrategy(CtaTemplate):
         except Exception as e:
             self.write_log(f"挂卖单失败: {e}")
         return None
+    
+    def _create_emergency_sell_order(self) -> None:
+        """
+        创建应急卖单 - 当触发次数超过50次时调用
+        在CSV中创建一个仓位记录，卖出价格为当前价格+一个网格
+        下个tick时会被 _place_sell_for_pending_positions 处理并挂单
+        """
+        try:
+            if not self.spec or not self.last_price:
+                self.write_log("[应急卖单] 无法创建: 网格未初始化或无当前价格")
+                return
+            
+            # 获取当前价格对应的层级
+            current_level = self.engine.price_to_level_index(self.last_price)
+            if current_level is None:
+                self.write_log("[应急卖单] 无法创建: 当前价格不在网格范围内")
+                return
+            
+            # 计算卖出价格 = 当前价格 + 一个网格步长
+            sell_price = round(self.last_price + self.spec.step, 3)
+            sell_level = current_level + 1  # 高一级的层级
+            
+            # 确保卖出价格在网格范围内
+            if sell_level > self.spec.max_level_index:
+                self.write_log(f"[应急卖单] 无法创建: 卖出层级{sell_level}超出最大层级{self.spec.max_level_index}")
+                return
+            
+            # 检查是否已有该层级的卖单
+            if self._has_real_sell_order_at_price(sell_level):
+                self.write_log(f"[应急卖单] 跳过: 层级{sell_level}已有卖单")
+                return
+            
+            # 在CSV中创建一个虚拟仓位记录（买入价=卖出价-步长，这样卖出价就是买入价+步长）
+            now = datetime.now()
+            buy_time = now.strftime("%Y-%m-%d %H:%M:%S")
+            buy_price = round(sell_price - self.spec.step, 3)
+            
+            # 创建仓位记录，设置应急卖单信息但保持pending状态
+            entry = self.pos_book.add_buy(current_level, buy_price, 100, buy_time, None, None)
+            # 手动设置卖单信息（不调用set_sell_order，避免状态变成hanging）
+            entry.sell_order_id = f"EMERGENCY_{int(now.timestamp())}"
+            entry.sell_price = sell_price
+            entry.sell_level = sell_level
+            # 保持sell_status='pending'，这样_place_sell_for_pending_positions会处理它
+            
+            self.write_log(f"[应急卖单] 已创建: 买入价={buy_price:.6f}, 卖出价={sell_price:.6f}, 层级={sell_level}, 仓位ID={entry.entry_id}")
+            
+            # 立即保存到CSV
+            self.pos_book.save_to_csv()
+            self.write_log(f"[应急卖单] 已保存到CSV，下个tick将挂出卖单")
+            
+        except Exception as e:
+            self.write_log(f"[应急卖单] 创建失败: {e}")
+            import traceback
+            traceback.print_exc()
     
     def _mark_position_sell_filled(self, level_index: int, qty: int) -> None:
         """卖出成交时，标记对应仓位为已成交"""
