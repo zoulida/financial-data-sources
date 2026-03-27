@@ -64,6 +64,12 @@ class GridStrategyManager:
         self._order_map: Dict[int, Dict[str, Any]] = {}
         self._trade_seq: int = 0
         
+        # 订单记录文件路径
+        self._orders_log_path: Path = Path(__file__).resolve().parent / "trading_records" / stock_code.split(".")[0] / datetime.now().strftime("%Y%m%d") / "orders_placed.csv"
+        
+        # 初始化订单记录文件（清空并写入表头）
+        self._init_orders_log()
+        
         mode_str = "模拟模式" if simulate else "实盘模式"
         print(f"初始化网格策略管理器 ({mode_str})，监控股票: {stock_code}")
 
@@ -73,6 +79,31 @@ class GridStrategyManager:
     def _next_trade_id(self) -> int:
         self._trade_seq += 1
         return self._trade_seq
+    
+    def _init_orders_log(self) -> None:
+        """初始化订单记录文件：清空并写入表头"""
+        try:
+            self._orders_log_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(self._orders_log_path, 'w', newline='', encoding='utf-8') as f:
+                import csv
+                writer = csv.writer(f)
+                writer.writerow(['order_id', 'side', 'level_index', 'price', 'qty', 'placed_time', 'status'])
+            print(f"[订单记录] 初始化订单日志文件: {self._orders_log_path}")
+        except Exception as e:
+            print(f"[订单记录] 初始化失败: {e}")
+            traceback.print_exc()
+    
+    def _append_order_log(self, order_id: str, side: str, level_index: int, price: float, qty: int, status: str = "placed") -> None:
+        """追加记录一条订单"""
+        try:
+            with open(self._orders_log_path, 'a', newline='', encoding='utf-8') as f:
+                import csv
+                writer = csv.writer(f)
+                placed_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                writer.writerow([order_id, side, level_index, price, qty, placed_time, status])
+        except Exception as e:
+            print(f"[订单记录] 追加记录失败: {e}")
+            traceback.print_exc()
     
     def _convert_xtdata_to_tick(self, stock_code: str, tick_data: Dict) -> Optional[TickData]:
         """
@@ -255,9 +286,10 @@ class GridStrategyManager:
             if self.trader is not None:
                 self.strategy.set_order_placer(self._place_real_order)
             
-            if not self._init_positions_text_and_check():
-                print("用户取消，停止策略创建")
-                return False
+            # 旧 positions.txt 同步已注释，使用新的 CSV 文件
+            # if not self._init_positions_text_and_check():
+            #     print("用户取消，停止策略创建")
+            #     return False
 
             print(f"策略实例创建成功: {strategy_name}")
             return True
@@ -303,8 +335,8 @@ class GridStrategyManager:
                 side = meta["side"]
                 ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 if side == "BUY":
-                    # 买入成交：仓位挂在当前网格（修复：原来错误地挂在上一个网格）
-                    self.strategy.pos_book.buy_at_level(level_index, traded_price, traded_volume)
+                    # 买入成交：在 strategy_manager 中不再直接调用 add_buy，改由 strategy.on_order_filled 统一处理
+                    # 避免重复记录仓位
                     
                     tr = Trade(
                         trade_id=self._next_trade_id(),
@@ -317,8 +349,20 @@ class GridStrategyManager:
                     )
                     self.strategy.trades.append(tr)
                 elif side == "SELL":
-                    # 卖出成交：从对应网格层级移除仓位
-                    self.strategy.pos_book.sell_at_level(level_index, traded_volume)
+                    # 卖出成交：标记对应仓位为已成交
+                    # 找到该层级有卖单的仓位并标记
+                    entries = [e for e in self.strategy.pos_book.entries 
+                               if e.level_index == level_index and e.sell_status == 'hanging']
+                    remaining_qty = traded_volume
+                    for entry in entries:
+                        if remaining_qty <= 0:
+                            break
+                        if entry.qty <= remaining_qty:
+                            self.strategy.pos_book.mark_sell_filled(entry.entry_id)
+                            remaining_qty -= entry.qty
+                        else:
+                            entry.qty -= remaining_qty
+                            remaining_qty = 0
                     
                     tr = Trade(
                         trade_id=self._next_trade_id(),
@@ -331,10 +375,14 @@ class GridStrategyManager:
                     )
                     self.strategy.trades.append(tr)
                 
+                # 获取成交编号
+                trade_id_raw = event.get("trade_id")
+                trade_id_str = str(trade_id_raw) if trade_id_raw is not None else None
+                
                 # 调用策略的成交回调方法
-                print(f"[DEBUG on_filled] 准备调用 on_order_filled: level={level_index}, side={side}")
+                print(f"[DEBUG on_filled] 准备调用 on_order_filled: level={level_index}, side={side}, trade_id={trade_id_str}")
                 try:
-                    self.strategy.on_order_filled(level_index, side, traded_price, traded_volume)
+                    self.strategy.on_order_filled(level_index, side, traded_price, traded_volume, trade_id_str)
                     print(f"[DEBUG on_filled] on_order_filled 调用成功")
                 except Exception as e2:
                     print(f"[DEBUG on_filled] on_order_filled 抛出异常: {e2}")
@@ -342,9 +390,11 @@ class GridStrategyManager:
                     traceback.print_exc()
                     raise
                 
-                self._save_positions_to_text()
+                # 旧 positions.txt 保存已注释，使用新的 CSV 文件
+                # self._save_positions_to_text()
             except Exception:
-                traceback.print_exc()
+                import traceback as tb
+                tb.print_exc()
 
         # 尝试创建交易器
         try:
@@ -455,10 +505,14 @@ class GridStrategyManager:
             if self.strategy is not None:
                 try:
                     self.strategy.on_order_placed(level_index, side, qty, price, oid_str if oid_int is None else oid_int)
-                except Exception:
-                    pass
-        except Exception:
-            pass
+                    # 追加记录订单到日志文件
+                    self._append_order_log(oid_str, side, level_index, price, qty, "placed")
+                except Exception as e:
+                    print(f"[订单记录] 通知策略或记录订单失败: {e}")
+                    traceback.print_exc()
+        except Exception as e:
+            print(f"[下单] 处理订单结果失败: {e}")
+            traceback.print_exc()
     
     def _positions_text_path(self) -> Path:
         base = Path(__file__).resolve().parent / "positionsRecord"
@@ -490,9 +544,15 @@ class GridStrategyManager:
                     f.write("level_idx,qty,avg_cost\n")
                 return
             book = PositionBook()
+            # 保留原来的 csv_path
+            if self.strategy.pos_book and self.strategy.pos_book.csv_path:
+                book.csv_path = self.strategy.pos_book.csv_path
             with open(path, "r", encoding="utf-8") as f:
                 lines = [line.strip() for line in f if line.strip()]
             if len(lines) <= 1:
+                # 保留原来的 csv_path
+                if self.strategy.pos_book and self.strategy.pos_book.csv_path:
+                    book.csv_path = self.strategy.pos_book.csv_path
                 self.strategy.pos_book = book
                 try:
                     self.strategy._pos_loaded_from_text = True
@@ -510,7 +570,15 @@ class GridStrategyManager:
                 except Exception:
                     continue
                 if qty > 0:
-                    book.set_holding(level_idx, avg_cost, qty)
+                    # 使用新的仓位记录方式 - 添加买入仓位
+                    from datetime import datetime
+                    buy_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    # 使用层级和数量构造伪订单号（历史数据没有真实订单号）
+                    pseudo_order_id = f"LOADED_{level_idx}_{qty}"
+                    book.add_buy(level_idx, avg_cost, qty, buy_time, pseudo_order_id)
+            # 保留原来的 csv_path
+            if self.strategy.pos_book and self.strategy.pos_book.csv_path:
+                book.csv_path = self.strategy.pos_book.csv_path
             self.strategy.pos_book = book
             try:
                 self.strategy._pos_loaded_from_text = True

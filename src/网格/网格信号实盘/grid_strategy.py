@@ -85,6 +85,13 @@ class GridStrategy(CtaTemplate):
         self._pos_loaded_from_text = False
         self.trades = []  # 交易记录列表
         
+        # 仓位CSV路径
+        strategy_dir = os.path.dirname(os.path.abspath(__file__))
+        pos_dir = os.path.join(strategy_dir, "positionsRecord")
+        os.makedirs(pos_dir, exist_ok=True)
+        symbol_clean = vt_symbol.replace(".", "")
+        self.pos_book.csv_path = os.path.join(pos_dir, f"grid_positions_{symbol_clean}.csv")
+        
                 
     def _get_order_status_desc(self, status_code: int) -> str:
         """获取订单状态中文描述"""
@@ -116,10 +123,20 @@ class GridStrategy(CtaTemplate):
     def on_start(self) -> None:
         """策略启动时的回调函数"""
         self.write_log("网格策略已启动，等待开盘价确定基准价...")
+        # 加载已有仓位
+        if self.pos_book.csv_path and os.path.exists(self.pos_book.csv_path):
+            self.pos_book.load_from_csv()
+            self.write_log(f"已加载仓位记录: {len(self.pos_book.entries)}条")
     
     def on_stop(self) -> None:
         """策略停止时的回调函数"""
         self.write_log("网格策略已停止")
+        
+        # 保存仓位到CSV
+        if self.pos_book.csv_path:
+            self.pos_book.save_to_csv()
+            self.write_log(f"仓位已保存到: {self.pos_book.csv_path}")
+        
         # 输出日终报告
         if self.spec and self.engine:
             now = datetime.now()
@@ -321,8 +338,10 @@ class GridStrategy(CtaTemplate):
                 else:
                     # 无法获取真实仓位，使用本地仓位作为备选
                     print(' 无法获取真实仓位，使用本地仓位作为备选')
-                    source_pos = self.pos_book.get(source_buy_level)
-                    if source_pos and source_pos.qty >= qty:
+                    # 使用新的仓位记录方式
+                    entries = self.pos_book.get_entries_by_level(source_buy_level)
+                    total_qty = sum(e.qty for e in entries if e.sell_status != 'filled')
+                    if total_qty >= qty:
                         self.place_sell_order(target_level, qty, target_price)
                         self.write_log(f"处理待挂卖单成功(本地仓位): 买入层级{source_buy_level} | 成本{source_cost:.6f} | 卖出价{target_price:.6f} | 目标层级{target_level} | 数量{qty}")
                     # else: 本地仓位不足，跳过
@@ -355,40 +374,11 @@ class GridStrategy(CtaTemplate):
 
     def _place_sell_orders_for_positions(self) -> None:
         """
-        检查本地持仓，为每个持仓在avg_cost+1网格位置挂卖单（如果没有的话）
-        对应要求1
+        检查本地持仓，为每个持仓挂卖单（如果没有的话）
+        注意：新逻辑下，这个方法主要由 _place_sell_for_pending_positions 处理
         """
-        if not self.spec:
-            return
-
-        qty = self.qty_per_fill
-
-        # 遍历所有本地持仓
-        for level_idx in range(self.spec.min_level_index, self.spec.max_level_index + 1):
-            pos = self.pos_book.get(level_idx)
-            if pos.qty <= 0 or pos.avg_cost <= 0:
-                continue
-
-            # 计算avg_cost+1网格位置
-            target_sell_price = pos.avg_cost + self.spec.step
-            target_level = int(round((target_sell_price - self.spec.baseline) / self.spec.step))
-
-            # 确保在网格范围内
-            if target_level < self.spec.min_level_index or target_level > self.spec.max_level_index:
-                continue
-
-            # 检查是否已经在该位置挂了卖单，或已有待挂卖单
-            has_pending_sell = self._has_pending(target_level, "SELL")
-            has_pending_to_place = any(
-                o['level'] == target_level 
-                for o in getattr(self, '_pending_sell_orders_to_place', [])
-            )
-            if not has_pending_sell:
-                sell_qty = pos.qty
-                self.place_sell_order(target_level, sell_qty, target_sell_price)
-                self.write_log(f"为持仓挂卖单: 持仓层级{level_idx} | 成本{pos.avg_cost:.6f} | 卖出价{target_sell_price:.6f} | 目标层级{target_level} | 数量{sell_qty}")
-            else:
-                pass  # 跳过重复挂卖单
+        # 新仓位逻辑下，这个方法不再需要，由 _place_sell_for_pending_positions 处理
+        pass
 
     def _ensure_buy_orders_below(self, current_level: int) -> None:
         """
@@ -406,13 +396,11 @@ class GridStrategy(CtaTemplate):
             has_real_order = self._has_real_buy_order_at_price(i)
             grid_price = self.spec.level_price(i)
 
-            # 检查上一网格是否有未成交卖单
-            #has_pending_sell_above = self._has_pending(i - 1, "SELL")
+            # 检查上一网格（价格高一厘）是否有未成交卖单
             has_real_sell_above = self._has_real_sell_order_at_price(i + 1)
-            #has_sell_above = has_pending_sell_above or has_real_sell_above
 
-            # 添加调试日志
-            # self.write_log(f"[DEBUG] 检查买入层级{i}: 价格{grid_price:.6f} | 本地挂单={has_pending} | 真实订单={has_real_order} | 上一网格卖单={has_real_sell_above}")
+            # 增加调试日志，排查为什么没挂单
+            self.write_log(f"[DEBUG] 检查买入层级{i}: 价格{grid_price:.6f} | 本地挂单={has_pending} | 真实订单={has_real_order} | 高一厘卖单={has_real_sell_above}")
 
             if not has_pending and not has_real_order and not has_real_sell_above:
                 # 检查最大持仓和资金
@@ -432,24 +420,21 @@ class GridStrategy(CtaTemplate):
 
         qty = self.qty_per_fill
 
-        # 检查当前价格网格是否有仓位
-        current_pos = self.pos_book.get(current_level)
+        # 检查当前价格网格是否有仓位（使用新的仓位记录方式）
+        current_qty = self.pos_book.get_total_qty_by_level(current_level)
         # 检查更高一网格（level+1，价格更低）是否有仓位
-        higher_pos = self.pos_book.get(current_level + 1)
+        higher_qty = self.pos_book.get_total_qty_by_level(current_level + 1)
 
         # 添加调试日志
-        current_qty = current_pos.qty if current_pos else 0
-        higher_qty = higher_pos.qty if higher_pos else 0
         has_pending_buy = self._has_pending(current_level, "BUY")
         has_real_buy = self._has_real_buy_order_at_price(current_level)
-        
-        # 检查上一网格（更高价格）是否有未成交卖单
         has_real_sell_above = self._has_real_sell_order_at_price(current_level + 1)
         
         # self.write_log(f"[DEBUG] 当前网格{current_level}检查: 当前仓位={current_qty}, 上一网格仓位={higher_qty}, 本地挂单={has_pending_buy}, 真实订单={has_real_buy}, 上一网格卖单={has_real_sell_above}")
 
         # 若当前价格网格与更高一网格都没有仓位，且上一网格没有卖单，挂买入订单
-        if (current_pos.qty <= 0 and higher_pos.qty <= 0 and
+        if (current_qty == 0 and
+            higher_qty == 0 and
             not self._has_pending(current_level, "BUY") and
             not self._has_real_buy_order_at_price(current_level) and
             not has_real_sell_above):
@@ -476,10 +461,10 @@ class GridStrategy(CtaTemplate):
         # 计算当前总持仓
         total_position = 0
         if self.spec:
-            for level_idx in range(self.spec.min_level_index, self.spec.max_level_index + 1):
-                pos = self.pos_book.get(level_idx)
-                if pos:
-                    total_position += pos.qty
+            # 使用新的仓位记录方式计算总仓位
+            for entry in self.pos_book.entries:
+                if entry.sell_status != 'filled':
+                    total_position += entry.qty
 
         # 检查最大持仓
         if total_position + qty > max_position:
@@ -624,6 +609,13 @@ class GridStrategy(CtaTemplate):
                 self._simulate_matching(current_price, tick_time)
             # 实盘模式不进行本地撮合，等待实盘回调
             
+            # 新仓位逻辑：每个tick检查
+            self._check_positions_on_tick(current_price)
+            
+            # 实时保存仓位到CSV
+            if self.pos_book.csv_path:
+                self.pos_book.save_to_csv()
+            
             self.put_event()
             
         except Exception as e:
@@ -670,8 +662,9 @@ class GridStrategy(CtaTemplate):
     def _simulate_order_fill(self, level_index: int, side: str, order_price: float, order_qty: int, fill_price: float, tick_time: str) -> None:
         """模拟订单成交"""
         try:
-            # 生成模拟订单编号
+            # 生成模拟订单编号和成交编号
             order_id = int(datetime.now().timestamp() * 1000000) % 1000000000
+            trade_id = int(datetime.now().timestamp() * 1000000) % 1000000000 + 1
             
             # 清除挂单状态
             key = (level_index, side)
@@ -682,11 +675,13 @@ class GridStrategy(CtaTemplate):
             
             # 更新仓位
             if side == "BUY":
-                self.pos_book.buy_at_level(level_index, fill_price, order_qty)
-                self.write_log(f"模拟成交: BUY | 层级: {level_index} | 价格: {fill_price:.6f} | 数量: {order_qty} | 订单编号: {order_id}")
+                # 使用新的仓位记录方式（不合并）
+                entry = self.pos_book.add_buy(level_index, fill_price, order_qty, tick_time, str(order_id), str(trade_id))
+                self.write_log(f"模拟成交: BUY | 层级: {level_index} | 价格: {fill_price:.6f} | 数量: {order_qty} | 委托: {order_id} | 成交: {trade_id} | 仓位ID: {entry.entry_id}")
             else:  # SELL
-                realized_qty = self.pos_book.sell_at_level(level_index, order_qty)
-                self.write_log(f"模拟成交: SELL | 层级: {level_index} | 价格: {fill_price:.6f} | 数量: {order_qty} | 订单编号: {order_id}")
+                # 卖出时标记对应仓位为已成交（需要找到对应的仓位记录）
+                self._mark_position_sell_filled(level_index, order_qty)
+                self.write_log(f"模拟成交: SELL | 层级: {level_index} | 价格: {fill_price:.6f} | 数量: {order_qty} | 委托: {order_id} | 成交: {trade_id}")
             
             # 记录交易 - 使用tick原始时间
             tr = Trade(
@@ -701,7 +696,7 @@ class GridStrategy(CtaTemplate):
             self.reporter.log_trade(tr)
             
             # 调用买入成交后的逻辑（如avg_cost挂卖单）
-            self.on_order_filled(level_index, side, fill_price, order_qty)
+            self.on_order_filled(level_index, side, fill_price, order_qty, str(trade_id))
             
         except Exception as e:
             self.write_log(f"模拟订单成交失败: {e}")
@@ -865,7 +860,7 @@ class GridStrategy(CtaTemplate):
                 order_price = order.get('price', 0)
                 order_type = order.get('order_type')
                 
-                # 检查是否为当前股票的买单
+            # 检查是否为当前股票的买单
                 is_match_stock = (
                     stock_code == current_stock_clean or
                     stock_code == current_stock or
@@ -873,11 +868,13 @@ class GridStrategy(CtaTemplate):
                     stock_code + '.SZ' == current_stock
                 )
                 
-                # 买单的order_type应该是23
-                is_buy_order = order_type == 23
+                # 买单的order_type可能是 23 (买入) 或 33 (买入开仓)
+                # 也可以通过 side 字段判断，QMT 中 48 表示买入
+                order_side = order.get('order_side', 0)
+                is_buy_order = (order_type in [23, 33]) or (order_side == 48)
                 
-                # 检查价格是否匹配（允许小幅差异）
-                price_match = abs(order_price - target_price) < 0.001
+                # 检查价格是否匹配（统一保留3位小数后比较）
+                price_match = abs(round(order_price, 3) - target_price) < 0.0001
                 
                 if is_match_stock and is_buy_order and price_match:
                     return True
@@ -905,7 +902,7 @@ class GridStrategy(CtaTemplate):
             if not orders_list:
                 return False
             
-            target_price = self.spec.level_price(level_index)
+            target_price = round(self.spec.level_price(level_index), 3)
             current_stock = self.manager.stock_code
             current_stock_clean = current_stock.replace('.SH', '').replace('.SZ', '')
             
@@ -922,14 +919,13 @@ class GridStrategy(CtaTemplate):
                     stock_code + '.SZ' == current_stock
                 )
                 
-                if not is_match_stock:
-                    continue
+                # 卖单的order_type可能是 24 (卖出) 或 34 (卖出平仓)
+                # 也可以通过 side 字段判断，QMT 中 48 表示买入，49 表示卖出
+                order_side = order.get('order_side', 0)
+                is_sell_order = (order_type in [24, 34]) or (order_side == 49)
                 
-                # 卖单的order_type应该是24
-                is_sell_order = order_type == 24
-                
-                # 检查价格是否匹配（允许小幅差异）
-                price_match = abs(order_price - target_price) < 0.001
+                # 检查价格是否匹配（统一保留3位小数后比较）
+                price_match = abs(round(order_price, 3) - target_price) < 0.0001
                 
                 if is_sell_order and price_match:
                     return True
@@ -1159,20 +1155,16 @@ class GridStrategy(CtaTemplate):
         else:
             self.write_log(f"挂单成功: {side} | 层级: {level_index} | 价格: {price:.6f} | 数量: {qty} | 订单编号: {order_id}")
 
-    def on_order_filled(self, level_index: int, side: str, fill_price: float, qty: int) -> None:
+    def on_order_filled(self, level_index: int, side: str, fill_price: float, qty: int, trade_id: str = None) -> None:
         """
-        订单成交回调 - 改造版本
-
-        6、买单成交时：
-           - 本地仓位增加且记录买入价格到avg_cost
-           - 记录成交日志
-           - 删除本地买入挂单
-           - 在avg_cost+1网格挂卖单
-
-        7、卖单成交时：
-           - 本地仓位减少
-           - 记录成交日志
-           - 删除本地卖出挂单
+        订单成交回调 - 新仓位逻辑
+        
+        买入成交时：
+           - 添加新的仓位记录（不合并）
+           - 记录买入时间、日期、数量、委托单号、成交单号
+        
+        卖单成交时：
+           - 标记对应仓位记录为已成交
         """
         try:
             key = (level_index, side)
@@ -1182,52 +1174,33 @@ class GridStrategy(CtaTemplate):
             if key in self._pending_details:
                 order_id = self._pending_details[key].get('order_id')
 
-            # 清除挂单状态和详细信息（要求6、7：删除本地挂单）
+            # 清除挂单状态和详细信息
             if key in self._pending_orders:
                 self._pending_orders.remove(key)
             if key in self._pending_details:
                 del self._pending_details[key]
 
             if side == "BUY":
-                # 6、买单成交处理
-                # 更新本地仓位（增加）并记录买入价格到avg_cost
-                self.pos_book.buy_at_level(level_index, fill_price, qty)
-
-                # 获取更新后的仓位信息
-                pos = self.pos_book.get(level_index)
-                if pos and pos.avg_cost > 0:
-                    # 在avg_cost+1网格位置挂卖单
-                    target_sell_price = pos.avg_cost + self.spec.step
-                    target_level = int(round((target_sell_price - self.spec.baseline) / self.spec.step))
-
-                    # 确保在网格范围内
-                    # 注意：不在on_order_filled中查询真实订单状态，避免阻塞回调线程
-                    # 直接记录待挂卖单，有买必卖，不再判断条件，不检查范围
-                    if target_level < self.spec.min_level_index or target_level > self.spec.max_level_index:
-                        self.write_log(f"[错误] 目标层级{target_level}超出网格范围[{self.spec.min_level_index}, {self.spec.max_level_index}]，但仍记录待挂卖单")
-                    
-                    # 记录待挂卖单，在_handle_level_event中处理，避免阻塞QMT回调线程
-                    if not hasattr(self, '_pending_sell_orders_to_place'):
-                        self._pending_sell_orders_to_place = deque()
-                    self._pending_sell_orders_to_place.append({
-                        'level': target_level,
-                        'price': target_sell_price,
-                        'qty': qty,  # 只卖新成交的数量，不是整个层级仓位
-                        'source_buy_level': level_index,
-                        'source_cost': pos.avg_cost
-                    })
-                    self.write_log(f"记录待挂卖单: 买入层级{level_index} | 成本{pos.avg_cost:.6f} | 卖出价{target_sell_price:.6f} | 目标层级{target_level} | 数量{qty}")
-
-                    self.write_log(f"买单成交: 层级{level_index} | 价格{fill_price:.6f} | 数量{qty} | 新成本{pos.avg_cost:.6f} | 订单{order_id}")
-                else:
-                    self.write_log(f"[DEBUG] pos无效: pos={pos}, avg_cost={pos.avg_cost if pos else 'N/A'}")
+                # 买入成交：添加新仓位记录（不合并）
+                now = datetime.now()
+                buy_time = now.strftime("%Y-%m-%d %H:%M:%S")
+                order_id_str = str(order_id) if order_id else None
+                trade_id_str = str(trade_id) if trade_id else None
+                entry = self.pos_book.add_buy(level_index, fill_price, qty, buy_time, order_id_str, trade_id_str)
+                self.write_log(f"买单成交: 层级{level_index} | 价格{fill_price:.6f} | 数量{qty} | 委托{order_id} | 成交{trade_id} | 仓位ID:{entry.entry_id}")
+                
+                # 立即保存仓位到CSV，确保数据持久化
+                self.pos_book.save_to_csv()
+                self.write_log(f"仓位已即时保存到CSV: {self.pos_book.csv_path}")
 
             else:  # SELL
-                # 7、卖单成交处理
-                # 本地仓位减少
-                realized_qty = self.pos_book.sell_at_level(level_index, qty)
-
-                self.write_log(f"卖单成交: 层级{level_index} | 价格{fill_price:.6f} | 数量{qty} | 订单{order_id}")
+                # 卖单成交：标记对应仓位为已成交
+                self._mark_position_sell_filled(level_index, qty)
+                self.write_log(f"卖单成交: 层级{level_index} | 价格{fill_price:.6f} | 数量{qty} | 委托{order_id} | 成交{trade_id}")
+                
+                # 立即保存仓位到CSV
+                self.pos_book.save_to_csv()
+                self.write_log(f"卖单成交后仓位已同步到CSV: {self.pos_book.csv_path}")
 
         except Exception as e:
             self.write_log(f"订单成交处理失败: {e}")
@@ -1237,102 +1210,249 @@ class GridStrategy(CtaTemplate):
             raise
     
     def _sync_positions_with_broker(self) -> None:
-        print("开始同步本地仓位")
-        """同步真实仓位与本地仓位，如果券商真实仓位少，则删除多余的本地仓位（从成本低开始删）"""
+        """同步本地仓位：从CSV重新加载（线程安全）并清理已成交(filled)的记录"""
         try:
-            # 1) 获取券商真实仓位
-            if not hasattr(self, 'manager') or not self.manager or not hasattr(self.manager, 'trader') or not self.manager.trader:
-                # self.write_log("[DEBUG] 没有trader实例，跳过仓位同步")
-                return  
+            # 1. 从CSV重新加载所有记录到内存（由于使用了RLock，load_from_csv 是线程安全的）
+            if self.pos_book.csv_path and os.path.exists(self.pos_book.csv_path):
+                self.pos_book.load_from_csv()
             
-            try:
-                positions = self.manager.trader.get_positions()
-                if not positions:
-                    # self.write_log("[DEBUG] 券商无持仓，清空所有本地仓位")
-                    self._clear_all_local_positions()
-                    return
-                
-                # 计算券商总持仓数量
-                broker_total_qty = 0
-                #self.write_log(f"[DEBUG] 券商返回的仓位数据: {positions}")
-                for pos in positions:
-                    stock_code = pos.get('stock_code', '')
-                    #self.write_log(f"[DEBUG] 检查仓位: 代码={stock_code}, 总数量={pos.get('volume', 0)}, 可用数量={pos.get('can_use_volume', 0)}, 冻结数量={pos.get('frozen_volume', 0)}")
-                    if stock_code == self.manager.stock_code or stock_code == self.manager.stock_code.replace('.SH', '').replace('.SZ', ''):
-                        # 使用volume而不是can_use_volume进行仓位同步
-                        # volume是总持仓，can_use_volume是可用仓位（扣除冻结部分）
-                        broker_total_qty += pos.get('volume', 0)
-                        #self.write_log(f"[DEBUG] 匹配到目标股票，累计数量: {broker_total_qty}")
-                
-                # self.write_log(f"[DEBUG] 券商真实持仓数量: {broker_total_qty}")
-                
-            except Exception as e:
-                self.write_log(f"[DEBUG] 获取券商仓位失败: {e}")
-                return
+            # 2. 在内存中删除所有 sell_status 为 'filled' 的仓位记录
+            initial_count = len(self.pos_book.entries)
+            # 注意：由于 PositionBook 的所有修改 entries 的方法都加了锁，这里直接操作 entries 列表
+            # 但为了严谨，我们应该确保 entries 的清理也在锁内（PositionBook 内部已支持大部分操作，
+            # 这里我们通过重新 load 后过滤再 save 来实现清理）
             
-            # 2) 计算本地总持仓数量
-            local_total_qty = 0
-            local_positions = []
+            valid_entries = [e for e in self.pos_book.entries if e.sell_status != 'filled']
+            removed_count = initial_count - len(valid_entries)
             
-            for level_idx in range(self.spec.min_level_index, self.spec.max_level_index + 1):
-                pos = self.pos_book.get(level_idx)
-                if pos and pos.qty > 0:
-                    local_total_qty += pos.qty
-                    local_positions.append({
-                        'level_idx': level_idx,
-                        'qty': pos.qty,
-                        'avg_cost': pos.avg_cost
-                    })
-            
-            # self.write_log(f"[DEBUG] 本地持仓数量: {local_total_qty}")
-            
-            # 3) 如果券商仓位 >= 本地仓位，不做处理
-            if broker_total_qty >= local_total_qty:
-                # self.write_log(f"[DEBUG] 券商仓位充足，无需同步")
-                return
-            
-            # 4) 券商仓位 < 本地仓位，需要删除多余的本地仓位
-            excess_qty = local_total_qty - broker_total_qty
-            # self.write_log(f"[DEBUG] 本地仓位过多，需要删除: {excess_qty}")
-            
-            # 按成本从低到高排序（优先删除成本低的仓位）
-            local_positions.sort(key=lambda x: x['avg_cost'])
-            
-            # 删除多余的本地仓位
-            removed_qty = 0
-            for pos_info in local_positions:
-                if removed_qty >= excess_qty:
-                    break
-                
-                level_idx = pos_info['level_idx']
-                pos_qty = pos_info['qty']
-                avg_cost = pos_info['avg_cost']
-                
-                # 计算需要删除的数量
-                qty_to_remove = min(pos_qty, excess_qty - removed_qty)
-                
-                # 删除本地仓位
-                self.pos_book.sell_at_level(level_idx, qty_to_remove)
-                removed_qty += qty_to_remove
-                
-                self.write_log(f"删除本地仓位: 层级{level_idx} | 成本{avg_cost:.6f} | 数量{qty_to_remove}")
-            
-            # 5) 保存更新后的仓位到文件
-            if hasattr(self, 'manager') and self.manager:
-                self.manager._save_positions_to_text()
-            self.write_log(f"[DEBUG] 仓位同步完成，删除了{removed_qty}个多余仓位")
+            if removed_count > 0:
+                self.write_log(f"仓位清理: 从内存中移除了 {removed_count} 条已成交记录")
+                # 更新 entries 并保存
+                with self.pos_book._lock:
+                    self.pos_book.entries = valid_entries
+                self.pos_book.save_to_csv()
             
         except Exception as e:
-            self.write_log(f"[DEBUG] 仓位同步失败: {e}")
+            self.write_log(f"仓位同步清理失败: {e}")
             import traceback
             traceback.print_exc()
     
     def _clear_all_local_positions(self) -> None:
         """清空所有本地仓位"""
-        for level_idx in range(self.spec.min_level_index, self.spec.max_level_index + 1):
-            pos = self.pos_book.get(level_idx)
-            if pos and pos.qty > 0:
-                self.pos_book.sell_at_level(level_idx, pos.qty)
-        if hasattr(self, 'manager') and self.manager:
-            self.manager._save_positions_to_text()
-        # self.write_log("[DEBUG] 已清空所有本地仓位")
+        self.pos_book.entries.clear()
+        if self.pos_book.csv_path:
+            self.pos_book.save_to_csv()
+    
+    def _check_positions_on_tick(self, current_price: float) -> None:
+        """
+        每个tick检查仓位逻辑：
+        1. 同步有卖单单号的卖单状态，若已成交则删除这条仓位
+        2. 检查买入日期，非今日的仓位挂卖单
+        3. 还没有挂卖单的仓位，挂卖单
+        """
+        try:
+            # 1. 同步卖单状态
+            self._sync_sell_order_status()
+            
+            # 2. 检查非今日仓位，确保有卖单
+            self._check_old_positions_and_sell()
+            
+            # 3. 为未挂卖单的仓位挂卖单
+            self._place_sell_for_pending_positions()
+            
+        except Exception as e:
+            self.write_log(f"tick仓位检查失败: {e}")
+    
+    def _sync_sell_order_status(self) -> None:
+        """同步卖单状态，已成交的删除仓位"""
+        if not hasattr(self, 'manager') or not self.manager or not hasattr(self.manager, 'trader') or not self.manager.trader:
+            return
+        
+        try:
+            # 获取未成交订单
+            orders_list = self.manager.trader.get_unfilled_orders(verbose=False)
+            if not orders_list:
+                orders_list = []
+            
+            # 获取所有已挂卖单的仓位
+            hanging_entries = self.pos_book.get_hanging_sell_entries()
+            
+            for entry in hanging_entries:
+                if not entry.sell_order_id:
+                    continue
+                
+                # 检查卖单是否还在未成交订单中
+                order_found = False
+                for order in orders_list:
+                    order_id = str(order.get('order_id', ''))
+                    if order_id == str(entry.sell_order_id):
+                        order_found = True
+                        # 检查订单状态（56=已成，54=已撤）
+                        status = order.get('order_status', 0)
+                        if status == 56:  # 已成交
+                            self.pos_book.mark_sell_filled(entry.entry_id)
+                            self.write_log(f"卖单已成交: 仓位ID={entry.entry_id} | 卖单号={entry.sell_order_id}")
+                        elif status == 54:  # 已撤销
+                            # 撤单后重新标记为pending
+                            entry.sell_status = 'pending'
+                            entry.sell_order_id = None
+                            self.write_log(f"卖单已撤销: 仓位ID={entry.entry_id}")
+                        break
+                
+                # 如果订单不在未成交列表中，可能已成交
+                if not order_found:
+                    # 标记为已成交
+                    self.pos_book.mark_sell_filled(entry.entry_id)
+                    self.write_log(f"卖单已成交(订单不存在): 仓位ID={entry.entry_id}")
+                    
+        except Exception as e:
+            self.write_log(f"同步卖单状态失败: {e}")
+    
+    def _check_old_positions_and_sell(self) -> None:
+        """检查非今日仓位，确保有卖单"""
+        today = datetime.now().strftime("%Y-%m-%d")
+        old_entries = self.pos_book.get_old_entries(today)
+        
+        for entry in old_entries:
+            if entry.sell_status == 'pending':
+                # 非今日仓位还没有挂卖单，需要挂卖单
+                self.write_log(f"发现非今日仓位: 仓位ID={entry.entry_id} | 买入日期={entry.buy_date}")
+    
+    def _place_sell_for_pending_positions(self) -> None:
+        """为未挂卖单的仓位挂卖单，检查券商可用仓位，优先挂买入价高的仓位"""
+        pending_entries = self.pos_book.get_pending_sell_entries()
+        
+        self.write_log(f"[DEBUG] _place_sell_for_pending_positions: 找到{len(pending_entries)}个pending仓位")
+        
+        if not pending_entries:
+            return
+        
+        # 按买入价格从高到低排序（优先挂高价仓位，卖出价也高）
+        pending_entries.sort(key=lambda e: e.buy_price, reverse=True)
+        
+        # 获取券商可用仓位
+        broker_available_qty = 0
+        if hasattr(self, 'manager') and self.manager and hasattr(self.manager, 'trader') and self.manager.trader:
+            try:
+                positions = self.manager.trader.get_positions()
+                if positions:
+                    for pos in positions:
+                        stock_code = pos.get('stock_code', '')
+                        if stock_code == self.manager.stock_code or stock_code == self.manager.stock_code.replace('.SH', '').replace('.SZ', ''):
+                            broker_available_qty = pos.get('can_use_volume', 0)
+                            break
+            except Exception as e:
+                self.write_log(f"获取券商仓位失败: {e}")
+        
+        for entry in pending_entries:
+            if not self.spec:
+                continue
+            
+            # 计算卖出价格 = 买入价 + 一个网格步长，并四舍五入保留3位小数
+            sell_price = round(entry.buy_price + self.spec.step, 3)
+            sell_level = int(round((sell_price - self.spec.baseline) / self.spec.step))
+            
+            self.write_log(f"[DEBUG] 尝试为仓位挂卖单: 仓位ID={entry.entry_id} | 买入价={entry.buy_price:.6f} | 目标卖价={sell_price:.6f} | 目标层级={sell_level}")
+            
+            # 检查券商是否有可用仓位（至少100股）
+            if broker_available_qty < 100:
+                self.write_log(f"跳过挂单: 券商可用仓位不足一手: 仓位ID={entry.entry_id} | 可用{broker_available_qty}")
+                continue
+            
+            # 检查是否在网格范围内
+            if sell_level < self.spec.min_level_index or sell_level > self.spec.max_level_index:
+                self.write_log(f"跳过挂单: 卖出层级超出范围: 仓位ID={entry.entry_id} | 目标层级={sell_level}")
+                continue
+            
+            # 检查是否已有该价格的卖单
+            if self._has_real_sell_order_at_price(sell_level):
+                self.write_log(f"跳过挂单: 层级{sell_level}价格{sell_price:.6f}已有在途卖单: 仓位ID={entry.entry_id}")
+                continue
+            
+            # 计算实际可挂单数量（取仓位数量和可用仓位的较小值，且为100的整数倍）
+            max_possible_qty = min(entry.qty, broker_available_qty)
+            actual_qty = (max_possible_qty // 100) * 100  # 向下取整到100的整数倍
+            
+            if actual_qty < 100:
+                self.write_log(f"跳过挂单: 可挂单数量不足一手: 仓位ID={entry.entry_id} | 可卖{max_possible_qty} -> 实际{actual_qty}")
+                continue
+            
+            # 挂卖单（使用实际数量）
+            order_id = self._place_sell_order_for_entry_partial(entry, sell_price, sell_level, actual_qty)
+            if order_id:
+                # 更新仓位记录：减少数量为已挂单数量，标记剩余为pending
+                if actual_qty < entry.qty:
+                    # 部分挂单：原仓位减少，创建新仓位记录剩余数量
+                    entry.qty -= actual_qty
+                    self.write_log(f"部分挂单: 仓位ID={entry.entry_id} | 挂单数量={actual_qty} | 剩余数量={entry.qty}")
+                else:
+                    # 全部挂单：更新卖单信息
+                    self.pos_book.set_sell_order(entry.entry_id, order_id, sell_price, sell_level)
+                self.write_log(f"为仓位挂卖单: 仓位ID={entry.entry_id} | 买入价={entry.buy_price:.6f} | 卖出价={sell_price:.6f} | 数量={actual_qty} | 订单号={order_id}")
+                # 减少可用仓位计数
+                broker_available_qty -= actual_qty
+    
+    def _place_sell_order_for_entry_partial(self, entry: 'PositionEntry', sell_price: float, sell_level: int, qty: int) -> Optional[str]:
+        """为指定仓位挂卖单（指定数量）"""
+        try:
+            if self._simulate_mode:
+                # 模拟模式：生成模拟订单号
+                order_id = f"SIM_{int(datetime.now().timestamp() * 1000000) % 1000000000}"
+                self._mark_pending(sell_level, "SELL", qty, sell_price, order_id)
+                return order_id
+            else:
+                # 实盘模式：真实下单
+                if hasattr(self, 'manager') and self.manager and hasattr(self.manager, 'trader') and self.manager.trader:
+                    order_id = self.manager.trader.sell(
+                        stock_code=self.manager.stock_code,
+                        volume=qty,
+                        price=sell_price
+                    )
+                    if order_id:
+                        self._mark_pending(sell_level, "SELL", qty, sell_price, str(order_id))
+                        return str(order_id)
+        except Exception as e:
+            self.write_log(f"挂卖单失败: {e}")
+        return None
+    
+    def _place_sell_order_for_entry(self, entry: 'PositionEntry', sell_price: float, sell_level: int) -> Optional[str]:
+        """为指定仓位挂卖单"""
+        try:
+            if self._simulate_mode:
+                # 模拟模式：生成模拟订单号
+                order_id = f"SIM_{int(datetime.now().timestamp() * 1000000) % 1000000000}"
+                self._mark_pending(sell_level, "SELL", entry.qty, sell_price, order_id)
+                return order_id
+            else:
+                # 实盘模式：真实下单
+                if hasattr(self, 'manager') and self.manager and hasattr(self.manager, 'trader') and self.manager.trader:
+                    order_id = self.manager.trader.sell(
+                        stock_code=self.manager.stock_code,
+                        volume=entry.qty,
+                        price=sell_price
+                    )
+                    if order_id:
+                        self._mark_pending(sell_level, "SELL", entry.qty, sell_price, str(order_id))
+                        return str(order_id)
+        except Exception as e:
+            self.write_log(f"挂卖单失败: {e}")
+        return None
+    
+    def _mark_position_sell_filled(self, level_index: int, qty: int) -> None:
+        """卖出成交时，标记对应仓位为已成交"""
+        # 找到该层级有卖单且卖单状态为hanging的仓位
+        entries = [e for e in self.pos_book.entries 
+                   if e.level_index == level_index and e.sell_status == 'hanging']
+        
+        remaining_qty = qty
+        for entry in entries:
+            if remaining_qty <= 0:
+                break
+            if entry.qty <= remaining_qty:
+                # 完全成交
+                self.pos_book.mark_sell_filled(entry.entry_id)
+                remaining_qty -= entry.qty
+            else:
+                # 部分成交（减少数量）
+                entry.qty -= remaining_qty
+                remaining_qty = 0

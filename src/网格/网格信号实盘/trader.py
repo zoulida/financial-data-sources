@@ -54,10 +54,19 @@ def build_qmt_trader_with_callback(on_filled, path: str, account: str, account_t
                 traceback.print_exc()
 
         def on_stock_trade(self, trade):
-            """成交推送 - 仅在订单回报里处理全部成交"""
+            """成交推送 - 触发成交回调并传递成交编号"""
             super().on_stock_trade(trade)
-            # 成交推送不直接触发，在订单回报中处理
-            pass
+            try:
+                evt = {
+                    "order_id": trade.order_id,
+                    "trade_id": trade.trade_id,  # 成交编号
+                    "stock_code": trade.stock_code,
+                    "traded_price": trade.traded_price,
+                    "traded_volume": trade.traded_volume,
+                }
+                self.filled_callback(evt)
+            except Exception:
+                traceback.print_exc()
     
     # 创建BaseTrader实例
     trader = BaseTrader(path=path, account=account, session_id=session_id)

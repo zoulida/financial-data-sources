@@ -165,7 +165,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--baseline",
         type=float,
-        default=0.941,
+        default=0.997,
         help="若提供则使用该基准价（例如 0.680）；否则用9:30开盘价",
     )
     parser.add_argument(
