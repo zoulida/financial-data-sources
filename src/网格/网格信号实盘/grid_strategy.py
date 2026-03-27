@@ -92,7 +92,36 @@ class GridStrategy(CtaTemplate):
         symbol_clean = vt_symbol.replace(".", "")
         self.pos_book.csv_path = os.path.join(pos_dir, f"grid_positions_{symbol_clean}.csv")
         
-                
+        # 应急卖单触发记录CSV路径
+        today = datetime.now().strftime("%Y%m%d")
+        emergency_dir = os.path.join(strategy_dir, "trading_records", symbol_clean, today)
+        os.makedirs(emergency_dir, exist_ok=True)
+        self._emergency_log_path = os.path.join(emergency_dir, "emergency_sell_triggers.csv")
+        self._init_emergency_log()
+        
+    def _init_emergency_log(self) -> None:
+        """初始化应急卖单触发记录CSV文件（程序启动时清空）"""
+        try:
+            import csv
+            # 以写入模式打开，清空文件并写入表头
+            with open(self._emergency_log_path, 'w', newline='', encoding='utf-8') as f:
+                writer = csv.writer(f)
+                writer.writerow(['timestamp', 'current_price', 'sell_price', 'sell_level', 'trigger_count'])
+        except Exception as e:
+            self.write_log(f"初始化应急卖单日志失败: {e}")
+    
+    def _append_emergency_log(self, current_price: float, sell_price: float, sell_level: int, trigger_count: int) -> None:
+        """追加应急卖单触发记录到CSV"""
+        try:
+            import csv
+            from datetime import datetime
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            with open(self._emergency_log_path, 'a', newline='', encoding='utf-8') as f:
+                writer = csv.writer(f)
+                writer.writerow([timestamp, f"{current_price:.6f}", f"{sell_price:.6f}", sell_level, trigger_count])
+        except Exception as e:
+            self.write_log(f"记录应急卖单日志失败: {e}")
+    
     def _get_order_status_desc(self, status_code: int) -> str:
         """获取订单状态中文描述"""
         status_map = {
@@ -1507,6 +1536,10 @@ class GridStrategy(CtaTemplate):
             entry.sell_price = sell_price
             entry.sell_level = sell_level
             # 保持sell_status='pending'，这样_place_sell_for_pending_positions会处理它
+            
+            # 记录应急卖单触发事件到CSV
+            trigger_count = getattr(self, '_max_position_trigger_count', 0)
+            self._append_emergency_log(self.last_price, sell_price, sell_level, trigger_count)
             
             self.write_log(f"[应急卖单] 已创建: 买入价={buy_price:.6f}, 卖出价={sell_price:.6f}, 层级={sell_level}, 仓位ID={entry.entry_id}")
             
