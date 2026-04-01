@@ -121,13 +121,7 @@ def visualize_divergence(
     
     df = df.sort_values("date").reset_index(drop=True)
     
-    # 取最近display_days天用于显示
-    if len(df) > display_days:
-        df_display = df.tail(display_days).copy().reset_index(drop=True)
-    else:
-        df_display = df.copy()
-    
-    # 检测分歧日
+    # 先检测分歧日，确定需要显示的范围
     target_info = None
     history_info = None
     
@@ -175,6 +169,35 @@ def visualize_divergence(
             
             if target_info:
                 break
+    
+    # 自适应显示长度：最少120天，如果历史分歧日超出范围则扩展
+    min_display_days = 120
+    if history_info and target_info:
+        # 计算需要显示的天数：从历史分歧日到最新日期 + 一些边距
+        days_needed = len(df) - history_info['idx'] + 10  # +10天边距
+        display_days = max(min_display_days, days_needed)
+    else:
+        display_days = max(min_display_days, display_days)
+    
+    # 取最近display_days天用于显示
+    if len(df) > display_days:
+        df_display = df.tail(display_days).copy().reset_index(drop=True)
+    else:
+        df_display = df.copy()
+    
+    # 重新计算分歧日在df_display中的位置
+    if target_info:
+        # 找到target_date在df_display中的索引
+        target_date = target_info['date']
+        target_mask = df_display['date'] == target_date
+        if target_mask.any():
+            target_info['idx'] = df_display[target_mask].index[0]
+    
+    if history_info:
+        history_date = history_info['date']
+        history_mask = df_display['date'] == history_date
+        if history_mask.any():
+            history_info['idx'] = df_display[history_mask].index[0]
     
     # 创建图表
     fig, axes = plt.subplots(3, 1, figsize=(14, 12), gridspec_kw={'height_ratios': [2, 1, 1]})
