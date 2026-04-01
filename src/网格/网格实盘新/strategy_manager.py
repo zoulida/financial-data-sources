@@ -148,6 +148,14 @@ class GridStrategyManager:
             high_price = tick_data.get('high', last_price)
             low_price = tick_data.get('low', last_price)
             
+            # 涨跌停价格：优先从xtdata获取，否则用昨收±10%估算
+            limit_up = tick_data.get('upperLimit', 0.0) or tick_data.get('limitUp', 0.0)
+            limit_down = tick_data.get('lowerLimit', 0.0) or tick_data.get('limitDown', 0.0)
+            if (not limit_up or limit_up <= 0) and last_close > 0:
+                limit_up = round(last_close * 1.1, 3)
+            if (not limit_down or limit_down <= 0) and last_close > 0:
+                limit_down = round(last_close * 0.9, 3)
+            
             # 根据股票代码判断交易所
             exchange = get_exchange_from_code(stock_code)
             
@@ -162,8 +170,8 @@ class GridStrategyManager:
                 open_interest=0.0,
                 last_price=last_price,
                 last_volume=0,
-                limit_up=0.0,
-                limit_down=0.0,
+                limit_up=limit_up,
+                limit_down=limit_down,
                 open_price=open_price,
                 high_price=high_price,
                 low_price=low_price,

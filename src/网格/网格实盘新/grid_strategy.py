@@ -578,6 +578,12 @@ class GridStrategy(CtaTemplate):
                 else:
                     return
             
+            # 保存涨跌停价格，供下单时检查
+            if hasattr(tick, 'limit_up') and tick.limit_up > 0:
+                self._limit_up = tick.limit_up
+            if hasattr(tick, 'limit_down') and tick.limit_down > 0:
+                self._limit_down = tick.limit_down
+            
             # 初始化网格（如果还未初始化）
             if not self.initialized:
                 # 如果提供了baseline，直接使用
@@ -609,14 +615,16 @@ class GridStrategy(CtaTemplate):
                 return
             
             # 打印当前价格
-            self.write_log(f"当前价格: {current_price:.6f}————————————————————————————————————————————————")
+            self.write_log(f"当前价格: {current_price:.6f}{'—' * 80}")
             
             # 越界处理/恢复
             crossed = self.engine.update_and_get_crossed_levels(current_price)
             self.last_price = current_price
             
             if self.engine.halted:
-                self.write_log("价格越界暂停")
+                limit_up = getattr(self, '_limit_up', 0)
+                limit_down = getattr(self, '_limit_down', 0)
+                self.write_log(f"⚠️ 价格越界暂停 | 当前价:{current_price:.6f} | 涨停:{limit_up:.6f} | 跌停:{limit_down:.6f} | 网格范围:[{self.spec.min_level_index}~{self.spec.max_level_index}]")
                 return
             
             # 只处理当前价格所在的层级，避免重复触发
@@ -771,6 +779,16 @@ class GridStrategy(CtaTemplate):
             self.write_log(f"模拟模式: 跳过真实下单 {side} | 层级: {level_index} | 价格: {price:.6f} | 数量: {qty}")
             return
         
+        # 【涨跌停检查】下单价格超出涨跌停范围时不下单
+        limit_up = getattr(self, '_limit_up', 0)
+        limit_down = getattr(self, '_limit_down', 0)
+        if limit_up > 0 and price > limit_up:
+            self.write_log(f"[拦截] 下单价格{price:.6f}超过涨停价{limit_up:.6f}，不下单 | {side} 层级{level_index}")
+            return
+        if limit_down > 0 and price < limit_down:
+            self.write_log(f"[拦截] 下单价格{price:.6f}低于跌停价{limit_down:.6f}，不下单 | {side} 层级{level_index}")
+            return
+        
         # 检查是否与上一个挂单方向相同且价格相同
         if not hasattr(self, '_order_history'):
             self._order_history = []
@@ -785,6 +803,13 @@ class GridStrategy(CtaTemplate):
         # 【新增】买单时：下单前生成本地订单号并写入position文件
         entry_id = None
         if side == "BUY":
+            # 【去重】检查同一层级是否已有pending记录，避免重复创建
+            existing_pending = [e for e in self.pos_book.entries 
+                               if e.level_index == level_index and e.sell_status == 'pending']
+            if existing_pending:
+                self.write_log(f"[去重] 层级{level_index}已有{len(existing_pending)}条pending记录，跳过创建")
+                return
+            
             entry_id = self._generate_entry_id()
             now = datetime.now()
             buy_time = now.strftime("%Y-%m-%d %H:%M:%S")
@@ -1460,33 +1485,50 @@ class GridStrategy(CtaTemplate):
             return
         
         try:
-            # 获取pending状态且有buy_order_id的仓位
+            updated = False
+            
+            # 【清理】无buy_order_id的pending条目，超过60秒视为发单失败，直接删除
+            stale_entries = [e for e in self.pos_book.entries 
+                           if e.sell_status == 'pending' and not e.buy_order_id and e.buy_time]
+            for entry in stale_entries:
+                try:
+                    entry_time = datetime.strptime(entry.buy_time, "%Y-%m-%d %H:%M:%S")
+                    age_seconds = (datetime.now() - entry_time).total_seconds()
+                    if age_seconds > 60:
+                        self.write_log(f"[清理] 无买单号的过期条目: 仓位ID={entry.entry_id} | 层级={entry.level_index} | 已过{int(age_seconds)}秒")
+                        self.pos_book.remove_entry(entry.entry_id)
+                        updated = True
+                except Exception:
+                    pass
+            
+            # 获取pending状态且有buy_order_id的仓位，查券商确认
             pending_entries = [e for e in self.pos_book.entries 
                              if e.sell_status == 'pending' and e.buy_order_id]
             
-            if not pending_entries:
-                return
-            
-            # 查询券商所有订单
-            orders_list = self.manager.trader.get_orders()
-            if not orders_list:
-                return
-            
-            updated = False
-            for entry in pending_entries:
-                for order in orders_list:
-                    order_id = str(order.get('order_id', ''))
-                    if order_id == str(entry.buy_order_id):
-                        status = order.get('order_status', 0)
-                        if status == 56:  # 已成交
-                            entry.sell_status = 'BuyFilled'
-                            self.write_log(f"买单已成交(同步): 仓位ID={entry.entry_id} | 层级={entry.level_index} | 买单号={entry.buy_order_id} | 状态->BuyFilled")
-                            updated = True
-                        elif status == 54:  # 已撤销
-                            self.write_log(f"买单已撤销(同步): 仓位ID={entry.entry_id} | 层级={entry.level_index} | 买单号={entry.buy_order_id} | 将删除")
-                            self.pos_book.remove_entry(entry.entry_id)
-                            updated = True
-                        break
+            if pending_entries:
+                # 查询券商所有订单
+                orders_list = self.manager.trader.get_orders()
+                if not orders_list:
+                    orders_list = []
+                
+                for entry in pending_entries:
+                    for order in orders_list:
+                        order_id = str(order.get('order_id', ''))
+                        if order_id == str(entry.buy_order_id):
+                            status = order.get('order_status', 0)
+                            if status == 56:  # 已成交
+                                entry.sell_status = 'BuyFilled'
+                                self.write_log(f"买单已成交(同步): 仓位ID={entry.entry_id} | 层级={entry.level_index} | 买单号={entry.buy_order_id} | 状态->BuyFilled")
+                                updated = True
+                            elif status == 54:  # 已撤销
+                                self.write_log(f"买单已撤销(同步): 仓位ID={entry.entry_id} | 层级={entry.level_index} | 买单号={entry.buy_order_id} | 将删除")
+                                self.pos_book.remove_entry(entry.entry_id)
+                                updated = True
+                            elif status == 57:  # 废单
+                                self.write_log(f"买单废单(同步): 仓位ID={entry.entry_id} | 层级={entry.level_index} | 买单号={entry.buy_order_id} | 将删除")
+                                self.pos_book.remove_entry(entry.entry_id)
+                                updated = True
+                            break
             
             if updated:
                 self.pos_book.save_to_csv()
@@ -1571,7 +1613,7 @@ class GridStrategy(CtaTemplate):
         cancelled_entries = [e for e in self.pos_book.entries if e.sell_status == 'cancelled']
         entries_to_sell = buy_filled_entries + cancelled_entries
         
-        self.write_log(f"[DEBUG] _place_sell_for_pending_positions: 找到{len(buy_filled_entries)}个BuyFilled + {len(cancelled_entries)}个cancelled仓位")
+        # self.write_log(f"[DEBUG] _place_sell_for_pending_positions: 找到{len(buy_filled_entries)}个BuyFilled + {len(cancelled_entries)}个cancelled仓位")
         
         if not entries_to_sell:
             return
