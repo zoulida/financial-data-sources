@@ -174,9 +174,16 @@ class PositionBook:
             )
 
     def get_pending_entries(self) -> List[PositionEntry]:
-        """获取 sell_status == pending 的仓位"""
+        """获取买单未成交的仓位（BuySubmit + pending）"""
         with self._lock:
-            return [e for e in self.entries if e.sell_status == PositionStatus.PENDING]
+            return [e for e in self.entries if e.sell_status in (
+                PositionStatus.BUY_SUBMIT, PositionStatus.PENDING
+            )]
+
+    def get_buy_submit_entries(self) -> List[PositionEntry]:
+        """获取本地已发出但尚未确认券商挂单的仓位（BuySubmit）"""
+        with self._lock:
+            return [e for e in self.entries if e.sell_status == PositionStatus.BUY_SUBMIT]
 
     def get_buy_filled_entries(self) -> List[PositionEntry]:
         """获取买单已成交、等待挂卖单的仓位（BuyFilled）"""
@@ -209,7 +216,7 @@ class PositionBook:
             ]
 
     def get_pending_with_order_id(self) -> List[PositionEntry]:
-        """获取 pending 状态且有 buy_order_id 的仓位（需要查券商确认）"""
+        """获取 pending 状态且有 buy_order_id 的仓位（券商已确认挂单，需要查成交状态）"""
         with self._lock:
             return [
                 e for e in self.entries
@@ -217,11 +224,12 @@ class PositionBook:
             ]
 
     def get_pending_without_order_id(self) -> List[PositionEntry]:
-        """获取 pending 状态但无 buy_order_id 的仓位（可能发单失败）"""
+        """获取买单未成交且无 buy_order_id 的仓位（BuySubmit 或 pending 但无单号）"""
         with self._lock:
             return [
                 e for e in self.entries
-                if e.sell_status == PositionStatus.PENDING and not e.buy_order_id and e.buy_time
+                if e.sell_status in (PositionStatus.BUY_SUBMIT, PositionStatus.PENDING)
+                and not e.buy_order_id and e.buy_time
             ]
 
     # ==============================================================

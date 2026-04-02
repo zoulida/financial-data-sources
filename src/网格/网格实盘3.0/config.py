@@ -54,10 +54,18 @@ class OrderType:
 class PositionStatus:
     """
     仓位状态流转:
-        pending → BuyFilled → hanging → filled
-                                     ↘ cancelled → hanging (重新挂)
+        BuySubmit → pending → BuyFilled → hanging → filled
+                                                  ↘ cancelled → hanging (重新挂)
+
+        BuySubmit : 本地已发出买单请求，尚未确认券商是否接受
+        pending   : 券商已确认挂单（在未成交列表中可查到）
+        BuyFilled : 买单已成交，等待挂卖单
+        hanging   : 卖单已挂出，等待成交
+        filled    : 卖单已成交，一轮交易完成 → 随后清理删除
+        cancelled : 卖单被撤销 → 重新挂卖单
     """
-    PENDING     = "pending"      # 买单已下单，未成交
+    BUY_SUBMIT  = "BuySubmit"    # 本地已发出买单，尚未确认券商挂单成功
+    PENDING     = "pending"      # 券商已确认挂单，等待成交
     BUY_FILLED  = "BuyFilled"    # 买单已成交，等待挂卖单
     HANGING     = "hanging"      # 卖单已挂出
     FILLED      = "filled"       # 卖单已成交（完成一轮交易）

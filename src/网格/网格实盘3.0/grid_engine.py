@@ -19,7 +19,7 @@ class GridEngine:
 
     核心概念：
         - 每个层级 (level_index) 对应一个固定价格
-        - 价格从高到低：level_index 从 min(-up_grids) 到 max(+down_grids)
+        - 价格从低到高：level_index 从 min(-down_grids) 到 max(+up_grids)
         - 当价格跨越某个层级时，触发交易事件
         - 当价格超出网格范围时，进入 halted 状态
     """
@@ -46,7 +46,7 @@ class GridEngine:
         """
         将价格映射到最近的网格层级索引
 
-        计算方式: level_index = round((baseline - price) / step)
+        计算方式: level_index = round((price - baseline) / step)
         然后限制在 [min_level_index, max_level_index] 范围内
 
         Args:
@@ -58,7 +58,7 @@ class GridEngine:
         if price <= 0 or self.spec.step <= 0:
             return None
 
-        raw = (self.spec.baseline - price) / self.spec.step
+        raw = (price - self.spec.baseline) / self.spec.step
         level = round(raw)
 
         # 限制在网格范围内
@@ -72,8 +72,8 @@ class GridEngine:
         Returns:
             (最低价格, 最高价格) 元组
         """
-        low_price = self.spec.level_price(self.spec.max_level_index)
-        high_price = self.spec.level_price(self.spec.min_level_index)
+        low_price = self.spec.level_price(self.spec.min_level_index)
+        high_price = self.spec.level_price(self.spec.max_level_index)
         return low_price, high_price
 
     # ------------------------------------------------------------------
@@ -123,10 +123,10 @@ class GridEngine:
         crossed: List[int] = []
 
         if current_level > prev:
-            # 价格下跌：层级索引增大
+            # 价格上涨：层级索引增大
             crossed = list(range(prev + 1, current_level + 1))
         else:
-            # 价格上涨：层级索引减小
+            # 价格下跌：层级索引减小
             crossed = list(range(prev - 1, current_level - 1, -1))
 
         self._last_level = current_level

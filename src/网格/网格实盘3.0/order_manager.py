@@ -175,10 +175,11 @@ class OrderManager:
         self._order_history.append(key)
 
     def has_pending_buy_at_level(self, level_index: int) -> bool:
-        """检查指定层级是否已有 pending 状态的买单记录（避免重复创建）"""
+        """检查指定层级是否已有买单记录（BuySubmit 或 pending，避免重复创建）"""
         entries = [
             e for e in self.pos_book.entries
-            if e.level_index == level_index and e.sell_status == PositionStatus.PENDING
+            if e.level_index == level_index
+            and e.sell_status in (PositionStatus.BUY_SUBMIT, PositionStatus.PENDING)
         ]
         return len(entries) > 0
 
@@ -230,29 +231,44 @@ class OrderManager:
         self, unfilled_orders: List[dict], stock_code: str
     ) -> None:
         """
-        将本地挂单状态与券商未成交订单同步
+        将本地挂单标记与券商未成交订单同步
+
+        背景：
+            本地 _pending_orders 是"防重复下单"的标记集合，
+            记录"哪个层级已经有挂单了，不要再下"。
+            但券商侧订单可能已成交/撤销/废单，标记就过时了。
 
         规则：
-        - 本地有挂单但券商没有 → 清除本地挂单
-        - 本地有挂单且券商有，但数量变化 → 更新本地数量
-        - 本地有挂单但无 order_id，券商有匹配订单 → 补全 order_id
+            - 本地有标记但券商未成交列表没有 → 订单已离开（成交/撤销/废单），
+              清除过时标记，让后续决策逻辑可以重新挂单
+            - 本地有标记且券商有，但剩余数量变化 → 更新本地数量
+            - 本地有标记但无 order_id，券商有匹配订单 → 补全 order_id
+
+        注意：
+            这里只负责"数据清理"，不负责重新下单。
+            重新下单由 _handle_level_event 中的 _ensure_buy_orders_below
+            和 _place_buy_order_if_empty 在下一轮自动完成。
         """
+        # 券商无任何未成交订单 → 本地所有挂单标记都是过时的，全部清除
         if not unfilled_orders:
             self.clear_all_pending()
             return
 
-        # 构建券商真实订单字典
+        # ── 第一步：构建券商真实未成交订单字典 ──
+        # key=order_id, value={side, price, qty(剩余), status}
         real_orders: Dict[Any, Dict] = {}
         for order in unfilled_orders:
+            # 只处理当前股票的订单
             if not match_stock_code(order.get("stock_code", ""), stock_code):
                 continue
             order_id = order.get("order_id")
             order_volume = order.get("order_volume", 0)
             traded_volume = order.get("traded_volume", 0)
-            remaining = order_volume - traded_volume
+            remaining = order_volume - traded_volume  # 尚未成交的剩余数量
             if remaining <= 0:
-                continue
+                continue  # 已全部成交，不算未成交
 
+            # 判断买卖方向
             order_type = order.get("order_type")
             order_remark = order.get("order_remark", "").lower()
             if order_type == OrderType.BUY:
@@ -264,7 +280,7 @@ class OrderManager:
             elif "sell" in order_remark:
                 side = "SELL"
             else:
-                continue
+                continue  # 无法判断方向，跳过
 
             real_orders[order_id] = {
                 "side": side,
@@ -273,17 +289,18 @@ class OrderManager:
                 "status": order.get("order_status"),
             }
 
-        # 对比本地与真实订单
-        to_remove = []
+        # ── 第二步：逐个检查本地挂单标记，与券商订单对比 ──
+        to_remove = []  # 需要清除的过时标记
         for (level_idx, side) in list(self._pending_orders):
             detail = self._pending_details.get((level_idx, side))
             if not detail:
+                # 有标记但无详情，数据不一致，清除
                 to_remove.append((level_idx, side))
                 continue
 
             local_price = round(detail.get("price", 0), 6)
 
-            # 查找匹配的真实订单（按方向+价格）
+            # 在券商订单中查找匹配项（按方向 + 价格匹配）
             matched = None
             for oid, info in real_orders.items():
                 if info["side"] == side and abs(info["price"] - local_price) < 0.001:
@@ -291,42 +308,102 @@ class OrderManager:
                     break
 
             if matched:
+                # 找到匹配：券商确实有这笔未成交订单
                 oid, info = matched
                 if info["qty"] != detail.get("qty"):
-                    detail["qty"] = info["qty"]
+                    detail["qty"] = info["qty"]  # 部分成交，更新剩余数量
                 if detail.get("order_id") is None:
-                    detail["order_id"] = oid
+                    detail["order_id"] = oid  # 补全缺失的 order_id
             else:
+                # 未找到匹配：订单已不在券商未成交列表中
+                # 可能已成交、已撤销或废单，清除过时标记
                 to_remove.append((level_idx, side))
 
+        # ── 第三步：执行清除 ──
         for key in to_remove:
             self._pending_orders.discard(key)
             self._pending_details.pop(key, None)
 
     def sync_buy_order_status(self, all_orders: List[dict]) -> bool:
         """
-        同步买单状态：pending → BuyFilled / 删除
+        同步买单状态
 
-        检查 pending 状态且有 buy_order_id 的仓位，查券商确认：
-        - 已成交(56) → BuyFilled
-        - 已撤销(54) → 删除
-        - 废单(57)   → 删除
-        - 无 buy_order_id 且超时 → 删除
+        处理两类仓位：
+        1. BuySubmit（本地已发出，尚未确认）：
+           - 在券商未成交列表中找到 → pending（确认挂单成功）
+           - 在券商全部订单中找到已成交(56) → BuyFilled
+           - 超时无 buy_order_id → 删除（发单失败）
+        2. pending（券商已确认挂单）：
+           - 已成交(56) → BuyFilled
+           - 已撤销(54) → 删除
+           - 废单(57)   → 删除
+           - 无 buy_order_id 且超时 → 删除
 
         Returns:
             是否有更新（需要保存 CSV）
         """
         updated = False
 
-        # ── 清理无 buy_order_id 且超时的 pending 条目 ──
-        stale_entries = self.pos_book.get_pending_without_order_id()
+        # ── 1. 处理 BuySubmit 状态：确认券商是否已接受挂单 ──
+        submit_entries = self.pos_book.get_buy_submit_entries()
+        for entry in submit_entries:
+            if not entry.buy_order_id:
+                # 无 buy_order_id，检查是否超时
+                try:
+                    entry_time = datetime.strptime(entry.buy_time, "%Y-%m-%d %H:%M:%S")
+                    age = (datetime.now() - entry_time).total_seconds()
+                    if age > OrderConst.STALE_PENDING_TIMEOUT:
+                        self._log(
+                            f"[清理] BuySubmit无单号超时: 仓位ID={entry.entry_id} | "
+                            f"层级={entry.level_index} | 已过{int(age)}秒 | 发单可能失败"
+                        )
+                        self.pos_book.remove_entry(entry.entry_id)
+                        updated = True
+                except Exception:
+                    pass
+                continue
+
+            # 有 buy_order_id，查券商订单状态
+            for order in all_orders:
+                if str(order.get("order_id", "")) != str(entry.buy_order_id):
+                    continue
+                status = order.get("order_status", 0)
+                if status == OrderStatus.FILLED:
+                    # 已成交 → 直接跳到 BuyFilled
+                    entry.sell_status = PositionStatus.BUY_FILLED
+                    self._log(
+                        f"BuySubmit→BuyFilled: 仓位ID={entry.entry_id} | "
+                        f"层级={entry.level_index} | 买单号={entry.buy_order_id}"
+                    )
+                elif status in (OrderStatus.CANCELLED, OrderStatus.REJECTED):
+                    # 撤销/废单 → 删除
+                    self._log(
+                        f"BuySubmit撤销/废单: 仓位ID={entry.entry_id} | "
+                        f"层级={entry.level_index} | 买单号={entry.buy_order_id} | 将删除"
+                    )
+                    self.pos_book.remove_entry(entry.entry_id)
+                else:
+                    # 其他状态（如已报/部成）→ 确认券商已接受，转为 pending
+                    entry.sell_status = PositionStatus.PENDING
+                    self._log(
+                        f"BuySubmit→pending: 仓位ID={entry.entry_id} | "
+                        f"层级={entry.level_index} | 券商状态={status} | 确认挂单成功"
+                    )
+                updated = True
+                break
+
+        # ── 2. 清理无 buy_order_id 且超时的 pending 条目 ──
+        stale_entries = [
+            e for e in self.pos_book.entries
+            if e.sell_status == PositionStatus.PENDING and not e.buy_order_id and e.buy_time
+        ]
         for entry in stale_entries:
             try:
                 entry_time = datetime.strptime(entry.buy_time, "%Y-%m-%d %H:%M:%S")
                 age = (datetime.now() - entry_time).total_seconds()
                 if age > OrderConst.STALE_PENDING_TIMEOUT:
                     self._log(
-                        f"[清理] 无买单号的过期条目: 仓位ID={entry.entry_id} | "
+                        f"[清理] pending无买单号过期: 仓位ID={entry.entry_id} | "
                         f"层级={entry.level_index} | 已过{int(age)}秒"
                     )
                     self.pos_book.remove_entry(entry.entry_id)
@@ -334,7 +411,7 @@ class OrderManager:
             except Exception:
                 pass
 
-        # ── 查询有 buy_order_id 的 pending 条目 ──
+        # ── 3. 查询有 buy_order_id 的 pending 条目，确认成交状态 ──
         pending_entries = self.pos_book.get_pending_with_order_id()
         if not pending_entries or not all_orders:
             return updated

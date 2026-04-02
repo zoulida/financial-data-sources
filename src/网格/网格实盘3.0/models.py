@@ -31,10 +31,10 @@ class GridSpec:
 
     层级索引约定：
         - 0 = baseline 所在层级
-        - 负数 = 价格高于 baseline
-        - 正数 = 价格低于 baseline
-        - min_level_index = -up_grids
-        - max_level_index = +down_grids
+        - 正数 = 价格高于 baseline（向上）
+        - 负数 = 价格低于 baseline（向下）
+        - min_level_index = -down_grids（最低价）
+        - max_level_index = +up_grids（最高价）
     """
     baseline: float
     step: float
@@ -43,22 +43,22 @@ class GridSpec:
 
     @property
     def min_level_index(self) -> int:
-        """最小层级索引（价格最高端）"""
-        return -self.up_grids
+        """最小层级索引（价格最低端）"""
+        return -self.down_grids
 
     @property
     def max_level_index(self) -> int:
-        """最大层级索引（价格最低端）"""
-        return self.down_grids
+        """最大层级索引（价格最高端）"""
+        return self.up_grids
 
     def level_price(self, level_index: int) -> float:
         """
         根据层级索引计算对应价格
 
-        价格公式: baseline - level_index * step
-        即 level_index=0 → baseline, level_index>0 → 更低价格
+        价格公式: baseline + level_index * step
+        即 level_index=0 → baseline, level_index>0 → 更高价格, level_index<0 → 更低价格
         """
-        return round(self.baseline - level_index * self.step, 6)
+        return round(self.baseline + level_index * self.step, 6)
 
     def is_in_range(self, level_index: int) -> bool:
         """判断层级索引是否在网格范围内"""
@@ -93,7 +93,7 @@ class PositionEntry:
         buy_order_id  : 券商委托单号（下单成功后回填）
         buy_trade_id  : 券商成交单号（成交后回填）
         sell_order_id : 卖单券商单号
-        sell_status   : 仓位状态 (pending/BuyFilled/hanging/filled/cancelled)
+        sell_status   : 仓位状态 (BuySubmit/pending/BuyFilled/hanging/filled/cancelled)
         sell_price    : 卖出挂单价格
         sell_level    : 卖出目标层级
         sell_local_id : 卖单本地订单号
@@ -110,7 +110,7 @@ class PositionEntry:
 
     # —— 卖单状态 ——
     sell_order_id: Optional[str] = None
-    sell_status: str = "pending"
+    sell_status: str = "BuySubmit"
     sell_price: Optional[float] = None
     sell_level: Optional[int] = None
     sell_local_id: Optional[str] = None
@@ -149,7 +149,7 @@ class PositionEntry:
             buy_order_id=data.get("buy_order_id") or None,
             buy_trade_id=data.get("buy_trade_id") or None,
             sell_order_id=data.get("sell_order_id") or None,
-            sell_status=data.get("sell_status", "pending"),
+            sell_status=data.get("sell_status", "BuySubmit"),
             sell_price=float(data["sell_price"]) if data.get("sell_price") else None,
             sell_level=int(data["sell_level"]) if data.get("sell_level") else None,
             sell_local_id=data.get("sell_local_id") or None,
