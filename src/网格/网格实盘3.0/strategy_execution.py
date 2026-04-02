@@ -87,13 +87,6 @@ class ExecutionMixin:
                 self.write_log(f"跳过挂卖单: 层级{sell_level}超出范围 | 仓位ID={entry.entry_id}")
                 continue
 
-            # ── 检查是否已有该价格卖单 ──
-            broker, unfilled, _ = self._get_broker_data()
-            stock_code = self.manager.stock_code if self.manager else ""
-            if unfilled and self.order_mgr.has_real_sell_order_at_level(sell_level, self.spec, unfilled, stock_code):
-                self.write_log(f"跳过挂卖单: 层级{sell_level}已有在途卖单 | 仓位ID={entry.entry_id}")
-                continue
-
             # ── 计算实际可挂数量 ──
             actual_qty = min(entry.qty, broker_available)
             actual_qty = (actual_qty // self.hand_size) * self.hand_size

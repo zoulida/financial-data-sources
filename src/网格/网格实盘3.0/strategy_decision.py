@@ -92,6 +92,10 @@ class DecisionMixin:
         low = max(self.spec.min_level_index, current_level - OrderConst.BUY_GRIDS_BELOW)
 
         for i in range(low, current_level):
+            # ── 仓位簿去重：该层级已有未完成仓位（pending/BuyFilled/hanging/cancelled）→ 跳过 ──
+            if self.pos_book.get_total_qty_by_level(i) > 0:
+                continue
+
             has_local = self.order_mgr.has_pending(i, "BUY")
             has_real_buy = self.order_mgr.has_real_buy_order_at_level(i, self.spec, unfilled_orders, stock_code)
             has_real_sell_above = self.order_mgr.has_real_sell_order_at_level(i + 1, self.spec, unfilled_orders, stock_code)
@@ -187,7 +191,10 @@ class DecisionMixin:
         if self.order_mgr.is_duplicate_order("BUY", price):
             return
 
-        # ── 同一层级已有 pending 记录 → 跳过 ──
+        # ── 同一层级已有未完成仓位（pending/BuyFilled/hanging/cancelled）→ 跳过 ──
+        if self.pos_book.get_total_qty_by_level(level_index) > 0:
+            self.write_log(f"[去重] 层级{level_index}已有仓位，跳过")
+            return
         if self.order_mgr.has_pending_buy_at_level(level_index):
             self.write_log(f"[去重] 层级{level_index}已有pending记录，跳过")
             return
