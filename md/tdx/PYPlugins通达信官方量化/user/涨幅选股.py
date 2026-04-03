@@ -8,7 +8,7 @@ from tqcenter import tq
 tq.initialize(__file__)
 
 # 1. 基础配置
-batch_codes = tq.get_stock_list_in_sector('通达信88')     # 目标板块
+batch_codes = ["000001.SZ"]#tq.get_stock_list_in_sector('通达信88')     # 目标板块
 start_time = "20260105"                                  # 数据起始日期
 target_end = datetime.now().strftime("%Y%m%d")           # 数据结束日期（当前日期）
 target_gain = 5.0                                        # 目标涨幅（%），可修改
@@ -26,7 +26,7 @@ df_real = tq.get_market_data(
 )
 # 转换为「日期×股票代码」的收盘价宽表
 close_df = tq.price_df(df_real, 'Close', column_names=batch_codes)
-
+print(close_df,'type(close_df)','jjjjjjjjjjjjjjjjjjjjjjjjjj')
 # 3. 核心：计算当日相较于昨日的涨幅（%）
 # 昨日收盘价（向下平移1行）
 prev_close = close_df.shift(1)

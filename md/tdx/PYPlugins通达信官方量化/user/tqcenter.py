@@ -25,6 +25,7 @@ dll = ctypes.CDLL(str(global_dll_path))
 dll.InitConnect.restype = ctypes.c_char_p       # 初始化 获取id
 dll.GetStockListInStr.restype = ctypes.c_char_p  # 获取股票列表
 dll.GetHISDATsInStr.restype = ctypes.c_char_p   # K线数据
+dll.GetHISDATsInStr.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_char_p, ctypes.c_char_p, ctypes.c_char_p, ctypes.c_int, ctypes.c_int, ctypes.c_int]
 dll.GetCWDATAInStr.restype = ctypes.c_char_p    # 复权数据
 dll.Register_DataTransferFunc.restype=None      # 注册外套回调函数
 dll.SubscribeGPData.restype=ctypes.c_char_p     # 订阅单股数据
@@ -865,6 +866,7 @@ class tq:
             dividend_type_int, count, timeout_ms=60000
         )
 
+        print(f"[DEBUG] _fetch_market_data_batch 返回: {len(all_data)} 只股票有数据")
         # 快速格式化
         if period == 'tick':
             result_data = cls._fast_format_tick_data(all_data, field_list)
@@ -896,6 +898,8 @@ class tq:
             try:
                 stock_bytes = stock.encode('utf-8')
                 
+                print(f"[DEBUG] 准备调用DLL获取 {stock} 数据... run_id={cls._get_run_id()}, start={start_bytes}, end={end_bytes}, period={period_bytes}, div={dividend_type_int}, count={count}, timeout={timeout_ms}")
+                import sys; sys.stdout.flush()
                 ptr = dll.GetHISDATsInStr(
                     cls._get_run_id(),
                     stock_bytes,
@@ -906,13 +910,15 @@ class tq:
                     count,
                     timeout_ms
                 )
+                print(f"[DEBUG] DLL返回 {stock}: ptr类型={type(ptr)}, 长度={len(ptr) if ptr else 'None'}")
                 
                 if ptr and len(ptr) > 0:
                     data_dict = json.loads(ptr)
                     if data_dict.get("ErrorId") == "0":
                         all_data[stock] = data_dict
                         
-            except Exception:
+            except Exception as e:
+                print(f"[_fetch_market_data_batch] {stock} 报错: {e}")
                 continue
                 
         return all_data

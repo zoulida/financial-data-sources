@@ -56,8 +56,10 @@ class ExecutionMixin:
         if not entries_to_sell:
             return
 
-        # 按买入价从高到低排序
-        entries_to_sell.sort(key=lambda e: e.buy_price, reverse=True)
+        # 排序：cancelled 优先（隔日 hanging 需尽快重挂），再按买入价从高到低
+        entries_to_sell.sort(
+            key=lambda e: (0 if e.sell_status == PositionStatus.CANCELLED else 1, -e.buy_price)
+        )
 
         # 获取券商可用仓位
         broker_available = 0
@@ -249,12 +251,48 @@ class ExecutionMixin:
             self.write_log(f"tick仓位检查失败: {e}")
 
     def _check_old_positions(self) -> None:
-        """检查非今日仓位，打印提示"""
+        """
+        处理非今日仓位（隔日卖单/买单已被券商清除）
+
+        规则：
+            - hanging → cancelled（卖单被券商清除，触发重新挂卖单）
+            - pending/BuySubmit 且有 buy_order_id → BuyFilled（买单大概率已成交，需挂卖单）
+            - pending/BuySubmit 且无 buy_order_id → 删除（买单未成交且已被清除）
+        """
         today = datetime.now().strftime("%Y-%m-%d")
         old_entries = self.pos_book.get_old_entries(today)
+        changed = False
+
         for entry in old_entries:
-            if entry.sell_status in (PositionStatus.BUY_SUBMIT, PositionStatus.PENDING, PositionStatus.BUY_FILLED):
+            # ── hanging → cancelled：隔日卖单已被券商清除，需重新挂卖单 ──
+            if entry.sell_status == PositionStatus.HANGING:
+                entry.sell_status = PositionStatus.CANCELLED
+                entry.sell_order_id = ""
                 self.write_log(
-                    f"发现非今日仓位: 仓位ID={entry.entry_id} | "
-                    f"买入日期={entry.buy_date} | 状态={entry.sell_status}"
+                    f"隔日仓位处理: hanging→cancelled | 仓位ID={entry.entry_id} | "
+                    f"层级={entry.level_index} | 买入价={entry.buy_price:.6f}"
                 )
+                changed = True
+
+            # ── pending/BuySubmit：隔日买单已被券商清除 ──
+            elif entry.sell_status in (PositionStatus.BUY_SUBMIT, PositionStatus.PENDING):
+                if entry.buy_order_id:
+                    # 有券商单号 → 买单大概率已成交，标记 BuyFilled 等待挂卖单
+                    entry.sell_status = PositionStatus.BUY_FILLED
+                    self.write_log(
+                        f"隔日仓位处理: {PositionStatus.PENDING}→BuyFilled | "
+                        f"仓位ID={entry.entry_id} | 层级={entry.level_index} | "
+                        f"买单号={entry.buy_order_id}"
+                    )
+                    changed = True
+                else:
+                    # 无券商单号 → 买单从未确认，删除
+                    self.write_log(
+                        f"隔日仓位处理: 删除无效买单 | 仓位ID={entry.entry_id} | "
+                        f"层级={entry.level_index} | 状态={entry.sell_status}"
+                    )
+                    self.pos_book.remove_entry(entry.entry_id)
+                    changed = True
+
+        if changed:
+            self.pos_book.save_to_csv()
