@@ -195,6 +195,6 @@ class AuxiliaryMixin:
                         e.buy_time, e.buy_date, e.buy_order_id, e.buy_trade_id,
                         e.sell_order_id, e.sell_status, e.sell_price, e.sell_level,
                     ])
-            self.write_log(f"[删除日志] 已记录{len(entries)}条被删除仓位")
+            self.write_log(f"[删除日志] 已记录{len(entries)}条被删除仓位 | 原因={reason}")
         except Exception as e:
             self.write_log(f"[删除日志] 记录失败: {e}")

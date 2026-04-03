@@ -389,6 +389,11 @@ class PositionBook:
                         stack_info,
                     ])
 
-            print(f"[删除日志] {len(removed_ids)}条仓位被移除: {removed_ids}")
+            # 打印每条被删除仓位的状态，便于区分原因
+            detail_parts = []
+            for eid in removed_ids:
+                row = disk_entries[eid]
+                detail_parts.append(f"{eid}(状态={row.get('sell_status', '?')})")
+            print(f"[删除日志] {len(removed_ids)}条仓位从CSV消失: {', '.join(detail_parts)}")
         except Exception as e:
             print(f"[删除日志] 记录失败: {e}")
