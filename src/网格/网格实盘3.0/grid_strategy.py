@@ -246,7 +246,8 @@ class GridStrategy(DecisionMixin, ExecutionMixin, AuxiliaryMixin, CtaTemplate):
                 return
 
             # ── 打印当前价格 ──
-            self.write_log(f"当前价格: {current_price:.6f}{'—' * 80}")
+            cur_level = self.engine.price_to_level_index(current_price)
+            self.write_log(f"当前价格: {current_price:.6f} | 网格层级: {cur_level}{'—' * 70}")
 
             # ── 越界处理 ──
             crossed = self.engine.update_and_get_crossed_levels(current_price)
@@ -324,6 +325,12 @@ class GridStrategy(DecisionMixin, ExecutionMixin, AuxiliaryMixin, CtaTemplate):
         self.engine = GridEngine(self.spec)
         low_px, high_px = self.engine.bounds()
         self.write_log(f"Baseline={baseline:.6f}, Grid [{low_px:.6f}, {high_px:.6f}]")
+
+        # ── 基准价变更时，重算已有仓位的 level_index / sell_level ──
+        recalc_count = self.pos_book.recalc_levels(baseline, self.step)
+        if recalc_count > 0:
+            self.pos_book.save_to_csv()
+            self.write_log(f"基准价重算: {recalc_count}笔仓位的层级已更新")
 
         if self._pos_loaded_from_text:
             self.write_log("网格初始化完成：已从历史文件加载仓位")

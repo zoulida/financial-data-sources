@@ -1,93 +1,183 @@
-# 数据获取优先级规则
+# 量化项目编码规则
 
-## 数据源优先级
-当用户请求金融数据时，请按以下优先级选择数据源：
+> 本规则适用于本仓库下所有量化策略/选股/回测项目的开发，请严格遵守。
 
-### 1. 优先使用 XtQuant (xtdata)
-- **参考文档**: `md/xtdata/xtdata_api_guide.md`
-- **适用场景**: 行情数据、合约信息、实时数据等（**不包含财务数据**）
-- **优势**: 功能全面、字段完整、性能优秀
-- **主要接口**:
-  - `xtdata.get_market_data_ex()` - 获取行情数据
-  - `xtdata.get_instrument_detail()` - 获取合约信息
-  - `xtdata.subscribe_quote()` - 订阅实时数据
-- **限制**: XtQuant 不再获取财务数据，财务数据请使用 Wind API
+---
 
-### 2. 财务数据使用 Wind API
-- **参考文档**: `md/winds/Wind数据获取完整指南.md`
-- **适用场景**: 所有财务数据获取需求，以及当XtQuant无法满足需求时
-- **主要接口**:
-  - `w.wsd()` - 时间序列数据
-  - `w.wss()` - 截面数据
-- **优势**: 财务数据完整、准确、更新及时
+## 一、基础股票池获取
 
-## 代码生成规则
+**统一入口**: `src/基础筛选/filterStocks.py` → `get_universe_with_basics()`
 
-### 1. 行情数据使用 XtQuant
+### 函数签名
 ```python
-from xtquant import xtdata
-import pandas as pd
+from src.基础筛选.filterStocks import get_universe_with_basics
 
-# 初始化
-xtdata.set_token('your_token_here')
+df = get_universe_with_basics(max_price=18.0, max_mcap=200.0)
+# 返回 DataFrame，列: code, market_cap, free_float, last_price
+```
 
-# 获取行情数据示例
-data = xtdata.get_market_data_ex(
-    field_list=['open', 'high', 'low', 'close', 'volume', 'amount'],
-    stock_list=['000001.SZ'],
-    period='1d',
-    count=100
+### 说明
+- 数据源: `xtdata`（迅投），获取沪深A股全市场代码
+- 仅保留 **00/60** 开头的主板股票
+- 内置过滤: 价格 3~max_price 元，市值 30~max_mcap 亿元
+- 返回字段: `code`（如 600519.SH）、`market_cap`（亿元）、`free_float`（流通股本）、`last_price`（最新价）
+- 可通过环境变量 `DEBUG_MAX_CODES` 截断代码数量用于调试
+
+### 规则
+1. **所有策略必须从此函数获取初始股票池**，禁止自行拼装 `xtdata.get_stock_list_in_sector()` 等底层调用
+2. 如需调整价格/市值范围，通过参数 `max_price`、`max_mcap` 控制
+3. 后续若需 ST过滤、行业过滤 等，在此函数返回的 DataFrame 基础上叠加
+
+---
+
+## 二、K线数据获取
+
+**统一入口**: `source/实盘/xuntou/datadownload/合并下载数据.py`
+
+```python
+from source.实盘.xuntou.datadownload.合并下载数据 import getDayData, batchDownloadDayData, getDayDataCache
+```
+
+### 2.1 单只股票 — `getDayData`
+```python
+df = getDayData(
+    stock_code="600519.SH",
+    start_date="20240101",
+    end_date="20241231",
+    is_download=0,        # 0=从缓存读取, 1=重新下载
+    dividend_type='front'  # 'none'/'front'/'back'
+)
+# 返回 DataFrame，列: date, open, high, low, close, volume, amount
+```
+
+### 2.2 批量股票（≥100只） — `batchDownloadDayData`
+```python
+data_dict = batchDownloadDayData(
+    stock_codes=["600519.SH", "600036.SH"],
+    start_date="20240101",
+    end_date="20241231",
+    dividend_type='front',
+    need_download=1
+)
+# 返回 dict: {stock_code: DataFrame}
+```
+
+### 2.3 带缓存 — `getDayDataCache`
+```python
+df = getDayDataCache(stock_code="600519.SH", start_date="20240101", end_date="20241231")
+# LRU缓存，避免重复计算，参数同 getDayData
+```
+
+### 规则
+1. **所有K线数据必须通过上述函数获取**，禁止直接调用 `xtdata.get_market_data_ex()` 等底层接口获取日K
+2. 少量股票（<100只）用 `getDayData` 循环或 `getDayDataCache`；大批量用 `batchDownloadDayData`
+3. 日期格式统一 `YYYYMMDD` 字符串
+4. 股票代码必须包含市场后缀（`.SH` / `.SZ`）
+5. 默认前复权 `dividend_type='front'`，除非策略明确要求其他复权方式
+
+---
+
+## 三、其他数据（财务/基本面/特色指标）— Wind获取
+
+**统一入口**: `md/winds/通过excel插件/wind_formula_polling.py` → `fetch_wind_formula_to_dataframe()`
+
+### 函数签名
+```python
+from md.winds.通过excel插件.wind_formula_polling import fetch_wind_formula_to_dataframe
+
+df = fetch_wind_formula_to_dataframe(
+    formula='=WSD("600000.SH","close,pe_ttm,pb_lf","2025-01-01","2026-04-01")',
+    timeout=30,
+    interval=0.2,
+    visible=False  # 调试时可设 True 查看 Excel
 )
 ```
 
-### 2. 财务数据使用 Wind API
+### 工作原理
+- 通过 COM 自动化启动 Excel，写入 Wind 公式，轮询等待数据返回
+- 支持 Wind 所有 Excel 公式：`WSD`（时间序列）、`WSS`（截面）、`WSET`（数据集）等
+- 返回 `pandas.DataFrame`，首行为表头
+
+### Wind 字段查找
+- **字段参考文件**: `md/winds/merged_fields_fixed.txt`（约3000行，涵盖基本资料/财务/行情/基金/债券等全量字段）
+- 格式: `中文名称 -> wind字段名`，例如:
+  - `市盈率(TTM)` → `pe_ttm`
+  - `市净率(LF)` → `pb_lf`
+  - `总股本` → `total_shares`
+  - `所属申万行业名称(2021)` → `industry_sw_2021`
+  - `沪（深）股通持股数量` → `share_N`
+- 使用时在该文件中搜索中文关键词即可定位对应的 Wind 字段名
+
+### 常用公式示例
 ```python
-import WindPy as w
-import pandas as pd
+# 时间序列 — 获取收盘价
+'=WSD("600000.SH","close","2025-01-01","2026-04-01")'
 
-# 初始化
-w.start()
+# 时间序列 — 多字段
+'=WSD("600000.SH","close,pe_ttm,pb_lf,roe_ttm2","2025-01-01","2026-04-01")'
 
-# 获取财务数据示例
-data = w.wss("000001.SZ", "pe_ttm,pb_lf,roe,roa", "tradeDate=20231231")
-df = pd.DataFrame(data.Data, columns=data.Fields, index=data.Codes)
+# 截面数据 — 多股票单日
+'=WSS("600000.SH,000001.SZ","pe_ttm,pb_lf","tradeDate=20260401")'
+
+# 数据集 — 行业成分
+'=WSET("sectorconstituent","date=20260401;sectorid=a]01010100000000")'
 ```
 
-### 3. 字段查找规则
-- **XtQuant字段**: 参考 `md/xtdata/xtdata_api_guide.md` 中的完整字段列表（仅限行情数据）
-- **Wind字段**: 参考 `md/winds/Wind数据获取完整指南.md` 中的字段映射表
-- **完整字段**: 如需查找所有字段，参考 `md/winds/merged_fields_fixed.txt`
-
-### 4. 数据转换建议
-```python
-# XtQuant数据转DataFrame
-df = pd.DataFrame(data['close'].T)
-df.index.name = 'Date'
-
-# Wind数据转DataFrame  
-df = pd.DataFrame(data.Data, columns=data.Fields, index=data.Times)
-df.index.name = 'Date'
-```
-
-## 错误处理
-1. **行情数据**: 优先尝试XtQuant接口
-2. **财务数据**: 直接使用Wind API
-3. 如果XtQuant失败或字段不支持，再尝试Wind API
-4. 提供清晰的错误信息和解决方案
-
-## 注意事项
-- 始终检查数据获取的ErrorCode
-- 提供完整的数据处理代码
-- 包含必要的导入语句
-- 添加适当的错误处理机制
-- **重要**: XtQuant 仅用于行情数据，财务数据必须使用 Wind API
-
-## 官方文档参考
-- **XtQuant官方文档**: http://dict.thinktrader.net/nativeApi/xtdata.html?id=nOY9mc
-- **Wind API**: 参考Wind官方文档
+### 规则
+1. **K线行情之外的一切数据（财务/估值/股东/行业/资金流向等），统一走 Wind**
+2. 字段名必须从 `md/winds/merged_fields_fixed.txt` 中查找，禁止猜测字段名
+3. 每次使用新字段前，先在字段文件中确认字段存在
+4. Wind 公式日期格式为 `YYYY-MM-DD`（注意与K线数据的 `YYYYMMDD` 不同）
 
 ---
-**使用说明**: 此规则确保数据获取的优先级和一致性：
-- **行情数据**: 优先使用XtQuant
-- **财务数据**: 必须使用Wind API
-- 确保数据获取的完整性和准确性
+
+## 四、数据源分工总结
+
+| 数据类型 | 数据源 | 入口函数 |
+|---------|--------|---------|
+| 基础股票池（代码+市值+价格） | xtdata | `get_universe_with_basics()` |
+| 日K线（OHLCV） | xtdata（合并下载模块） | `getDayData()` / `batchDownloadDayData()` |
+| Tick数据 | xtdata（合并下载模块） | `get_tick_data()` / `get_batch_tick_data()` |
+| 财务数据（PE/PB/ROE等） | Wind Excel 公式 | `fetch_wind_formula_to_dataframe()` |
+| 基本面数据（行业/股东/股本等） | Wind Excel 公式 | `fetch_wind_formula_to_dataframe()` |
+| 其他特色指标 | Wind Excel 公式 | `fetch_wind_formula_to_dataframe()` |
+
+---
+
+## 五、通用编码规范
+
+### 5.1 代码格式
+- 股票代码统一使用 **带后缀格式**: `600519.SH`、`000001.SZ`
+- 日期统一使用 **字符串**: K线接口用 `YYYYMMDD`，Wind公式用 `YYYY-MM-DD`
+
+### 5.2 导入路径
+```python
+# 股票池
+from src.基础筛选.filterStocks import get_universe_with_basics
+
+# K线数据
+from source.实盘.xuntou.datadownload.合并下载数据 import getDayData, batchDownloadDayData, getDayDataCache
+
+# Wind数据
+from md.winds.通过excel插件.wind_formula_polling import fetch_wind_formula_to_dataframe
+```
+
+### 5.3 错误处理
+- 数据获取均需 try/except，异常以 NaN 或空 DataFrame 兜底，不中断策略流程
+- Wind 超时默认 30 秒，可按需调大
+- 批量下载自带重试机制（最多5次），无需额外封装
+
+### 5.4 禁止事项
+- ❌ 禁止直接调用 `xtdata.get_market_data_ex()` 获取日K（请用合并下载模块）
+- ❌ 禁止直接调用 `xtdata.get_stock_list_in_sector()` 构建股票池（请用 `get_universe_with_basics()`）
+- ❌ 禁止使用 `from WindPy import w` 直接调用 Wind Python API（请用 Excel 公式轮询方式）
+- ❌ 禁止猜测 Wind 字段名，必须查 `md/winds/merged_fields_fixed.txt`
+
+---
+
+## 六、参考文档
+- **XtQuant官方文档**: http://dict.thinktrader.net/nativeApi/xtdata.html?id=nOY9mc
+- **XtQuant API 指南**: `md/xtdata/xtdata_api_guide.md`
+- **Wind 数据指南**: `md/winds/Wind数据获取完整指南.md`
+- **Wind 字段大全**: `md/winds/merged_fields_fixed.txt`
+- **K线下载模块文档**: `md/合并下载数据/合并下载数据.md`

@@ -12,7 +12,7 @@ import traceback
 from datetime import datetime
 from typing import List, Optional
 
-from .config import DefaultParams, OrderConst, PositionStatus
+from .config import DefaultParams, OrderConst, OrderStatus, PositionStatus
 
 
 class ExecutionMixin:
@@ -48,23 +48,32 @@ class ExecutionMixin:
         """
         为买单已成交的仓位挂卖单
 
-        处理 BuyFilled + cancelled 状态的仓位，
+        处理 BuyFilled + cancelled + OverLimit 状态的仓位，
         按买入价从高到低排序（优先挂高价卖单），
         检查券商可用仓位后下单。
+        超涨停价时标记 OverLimit，每个 tick 自动重试。
         """
         entries_to_sell = self.pos_book.get_entries_needing_sell()
         if not entries_to_sell:
             return
 
-        # 排序：cancelled 优先（隔日 hanging 需尽快重挂），再按买入价从高到低
+        # 排序：cancelled/OverLimit 优先（需尽快重挂），再按买入价从高到低
         entries_to_sell.sort(
-            key=lambda e: (0 if e.sell_status == PositionStatus.CANCELLED else 1, -e.buy_price)
+            key=lambda e: (
+                0 if e.sell_status in (PositionStatus.CANCELLED, PositionStatus.OVER_LIMIT) else 1,
+                -e.buy_price,
+            )
         )
 
         # 获取券商可用仓位
         broker_available = 0
         if self.manager and hasattr(self.manager, "broker") and self.manager.broker.is_connected:
             broker_available = self.manager.broker.get_available_qty()
+
+        over_limit_changed = False
+        over_limit_count = 0          # 本轮被涨停价拦截的数量
+        over_limit_total_qty = 0      # 本轮被拦截的总股数
+        newly_over_limit_count = 0    # 本轮新标记 OverLimit 的数量
 
         for entry in entries_to_sell:
             if not self.spec:
@@ -78,6 +87,25 @@ class ExecutionMixin:
             else:
                 sell_price = round(entry.buy_price + self.spec.step, DefaultParams.PRICE_DECIMALS)
                 sell_level = int(round((sell_price - self.spec.baseline) / self.spec.step))
+
+            # ── 涨跌停价检查：超涨停价 → 标记 OverLimit，等下个 tick 重试（静默） ──
+            if not self._simulate_mode and not self.order_mgr.check_price_limit(sell_price, "SELL", sell_level, silent=True):
+                over_limit_count += 1
+                over_limit_total_qty += entry.qty
+                if entry.sell_status != PositionStatus.OVER_LIMIT:
+                    entry.sell_status = PositionStatus.OVER_LIMIT
+                    newly_over_limit_count += 1
+                    over_limit_changed = True
+                continue
+
+            # ── 之前是 OverLimit，现在涨停价已允许 → 恢复为 BuyFilled 以继续挂单 ──
+            if entry.sell_status == PositionStatus.OVER_LIMIT:
+                entry.sell_status = PositionStatus.BUY_FILLED
+                self.write_log(
+                    f"涨停价已允许，恢复挂单: 仓位ID={entry.entry_id} | "
+                    f"卖出价={sell_price:.6f} | 状态→BuyFilled"
+                )
+                over_limit_changed = True
 
             # ── 检查券商可用仓位 ──
             if broker_available < self.hand_size:
@@ -108,12 +136,24 @@ class ExecutionMixin:
                 )
                 broker_available -= actual_qty
 
+        # ── 汇总打印超涨停价拦截信息（仅一行） ──
+        if over_limit_count > 0:
+            self.write_log(
+                f"超涨停价拦截: {over_limit_count}笔/{over_limit_total_qty}股 | "
+                f"涨停价={self.order_mgr._limit_up:.6f}"
+                + (f" | 新标记{newly_over_limit_count}笔→OverLimit" if newly_over_limit_count > 0 else "")
+            )
+
+        if over_limit_changed:
+            self.pos_book.save_to_csv()
+
     def _execute_sell_for_entry(self, entry, sell_price: float, qty: int) -> Optional[str]:
-        """为指定仓位执行卖单下单"""
+        """为指定仓位执行卖单下单（涨跌停检查已在调用方完成）"""
         try:
+            sell_level = int(round((sell_price - self.spec.baseline) / self.spec.step)) if self.spec else 0
+
             if self._simulate_mode:
                 order_id = f"SIM_{int(datetime.now().timestamp() * 1_000_000) % 1_000_000_000}"
-                sell_level = int(round((sell_price - self.spec.baseline) / self.spec.step)) if self.spec else 0
                 self.order_mgr.mark_pending(sell_level, "SELL", qty, sell_price, order_id)
                 return order_id
 
@@ -121,7 +161,6 @@ class ExecutionMixin:
                 remark = f"SELL_{entry.entry_id}" if entry.entry_id else ""
                 order_id = self.manager.broker.sell_direct(qty, sell_price, remark)
                 if order_id:
-                    sell_level = int(round((sell_price - self.spec.baseline) / self.spec.step)) if self.spec else 0
                     self.order_mgr.mark_pending(sell_level, "SELL", qty, sell_price, order_id)
                 return order_id
         except Exception as e:
@@ -241,8 +280,8 @@ class ExecutionMixin:
                 self._log_removed_positions(removed, "filled状态清理")
                 self.pos_book.save_to_csv()
 
-            # 4. 检查非今日仓位
-            self._check_old_positions()
+            # 4. 检查非今日仓位（传入 all_orders，避免误撤今日新挂的卖单）
+            self._check_old_positions(all_orders)
 
             # 5. 挂卖单
             self._place_sell_for_pending_positions()
@@ -250,12 +289,14 @@ class ExecutionMixin:
         except Exception as e:
             self.write_log(f"tick仓位检查失败: {e}")
 
-    def _check_old_positions(self) -> None:
+    def _check_old_positions(self, all_orders: List[dict] = None) -> None:
         """
         处理非今日仓位（隔日卖单/买单已被券商清除）
 
         规则：
             - hanging → cancelled（卖单被券商清除，触发重新挂卖单）
+              ※ 如果 sell_order_id 在券商仍为活跃状态（已报/部成），说明是今日新挂
+                的卖单，不重置，避免反复 cancelled→hanging→cancelled 死循环
             - pending/BuySubmit 且有 buy_order_id → BuyFilled（买单大概率已成交，需挂卖单）
             - pending/BuySubmit 且无 buy_order_id → 删除（买单未成交且已被清除）
         """
@@ -266,6 +307,19 @@ class ExecutionMixin:
         for entry in old_entries:
             # ── hanging → cancelled：隔日卖单已被券商清除，需重新挂卖单 ──
             if entry.sell_status == PositionStatus.HANGING:
+                # 如果有 sell_order_id，先查券商确认该卖单是否仍活跃
+                # 活跃（已报50/部成55）说明是今日新挂的卖单，不应重置
+                if entry.sell_order_id and all_orders:
+                    broker_active = False
+                    for order in all_orders:
+                        if str(order.get("order_id", "")) == str(entry.sell_order_id):
+                            status = order.get("order_status", 0)
+                            if status not in (OrderStatus.CANCELLED, OrderStatus.REJECTED):
+                                broker_active = True
+                            break
+                    if broker_active:
+                        continue  # 卖单仍在券商活跃，跳过
+
                 entry.sell_status = PositionStatus.CANCELLED
                 entry.sell_order_id = ""
                 self.write_log(

@@ -118,12 +118,12 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="网格交易策略 v3.0 启动器")
     parser.add_argument("--symbol", default="162411.SZ", help="股票代码")
     parser.add_argument("--step", type=float, default=0.001, help="网格步长")
-    parser.add_argument("--up_grids", type=int, default=50, help="向上网格数")
-    parser.add_argument("--down_grids", type=int, default=100, help="向下网格数")
+    parser.add_argument("--up_grids", type=int, default=150, help="向上网格数")
+    parser.add_argument("--down_grids", type=int, default=150, help="向下网格数")
     parser.add_argument("--lot_per_grid", type=int, default=1, help="每格手数")
     parser.add_argument("--hand_size", type=int, default=100, help="每手股数")
     parser.add_argument("--out_dir", default="data/grid", help="输出目录")
-    parser.add_argument("--baseline", type=float, default=1.076,
+    parser.add_argument("--baseline", type=float, default=1.006,
                         help="基准价格；若提供则直接使用，否则使用9:30开盘价")
     parser.add_argument("--simulate", action=argparse.BooleanOptionalAction, default=False,
                         help="启用模拟回放模式")

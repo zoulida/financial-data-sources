@@ -76,18 +76,23 @@ class OrderManager:
         if limit_down > 0:
             self._limit_down = limit_down
 
-    def check_price_limit(self, price: float, side: str, level_index: int) -> bool:
+    def check_price_limit(self, price: float, side: str, level_index: int, silent: bool = False) -> bool:
         """
         检查下单价格是否在涨跌停范围内
+
+        Args:
+            silent: 为 True 时不打印拦截日志（用于批量检查后统一汇总）
 
         Returns:
             True = 价格合法可下单, False = 超出范围被拦截
         """
         if self._limit_up > 0 and price > self._limit_up:
-            self._log(f"[拦截] 下单价格{price:.6f}超过涨停价{self._limit_up:.6f}，不下单 | {side} 层级{level_index}")
+            if not silent:
+                self._log(f"[拦截] 下单价格{price:.6f}超过涨停价{self._limit_up:.6f}，不下单 | {side} 层级{level_index}")
             return False
         if self._limit_down > 0 and price < self._limit_down:
-            self._log(f"[拦截] 下单价格{price:.6f}低于跌停价{self._limit_down:.6f}，不下单 | {side} 层级{level_index}")
+            if not silent:
+                self._log(f"[拦截] 下单价格{price:.6f}低于跌停价{self._limit_down:.6f}，不下单 | {side} 层级{level_index}")
             return False
         return True
 

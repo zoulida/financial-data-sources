@@ -160,6 +160,27 @@ class PositionBook:
                     return e
             return None
 
+    def recalc_levels(self, baseline: float, step: float) -> int:
+        """
+        用新的 baseline/step 重新计算所有仓位的 level_index 和 sell_level
+
+        适用于基准价变更后修正历史仓位的层级映射。
+        Returns:
+            实际被修改的仓位数量
+        """
+        changed = 0
+        with self._lock:
+            for e in self.entries:
+                if e.sell_status == PositionStatus.FILLED:
+                    continue
+                new_level = int(round((e.buy_price - baseline) / step))
+                new_sell_level = int(round((e.sell_price - baseline) / step)) if e.sell_price else new_level + 1
+                if new_level != e.level_index or new_sell_level != e.sell_level:
+                    e.level_index = new_level
+                    e.sell_level = new_sell_level
+                    changed += 1
+        return changed
+
     def get_entries_by_level(self, level_index: int) -> List[PositionEntry]:
         """获取指定层级的所有仓位"""
         with self._lock:
@@ -208,11 +229,15 @@ class PositionBook:
             return [e for e in self.entries if e.buy_date != today]
 
     def get_entries_needing_sell(self) -> List[PositionEntry]:
-        """获取需要挂卖单的仓位（BuyFilled + cancelled）"""
+        """获取需要挂卖单的仓位（BuyFilled + cancelled + OverLimit）"""
         with self._lock:
             return [
                 e for e in self.entries
-                if e.sell_status in (PositionStatus.BUY_FILLED, PositionStatus.CANCELLED)
+                if e.sell_status in (
+                    PositionStatus.BUY_FILLED,
+                    PositionStatus.CANCELLED,
+                    PositionStatus.OVER_LIMIT,
+                )
             ]
 
     def get_pending_with_order_id(self) -> List[PositionEntry]:

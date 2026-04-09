@@ -55,6 +55,7 @@ class PositionStatus:
     """
     仓位状态流转:
         BuySubmit → pending → BuyFilled → hanging → filled
+                                        ↘ OverLimit (超涨停价，每tick重试)
                                                   ↘ cancelled → hanging (重新挂)
 
         BuySubmit : 本地已发出买单请求，尚未确认券商是否接受
@@ -70,6 +71,7 @@ class PositionStatus:
     HANGING     = "hanging"      # 卖单已挂出
     FILLED      = "filled"       # 卖单已成交（完成一轮交易）
     CANCELLED   = "cancelled"    # 卖单已撤销，需重新挂
+    OVER_LIMIT  = "OverLimit"    # 卖出价超过涨停价，暂不挂单，等待价格回升后自动重试
 
 
 # ============================================================

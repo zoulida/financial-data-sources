@@ -148,13 +148,23 @@ class DecisionMixin:
 
         Args:
             max_position: 当券商可用仓位超过此值时停止买入（0=不限制）
+                          OverLimit 仓位的股数会从可用仓位中扣除（它们因超涨停价暂时无法卖出）
         """
         # 检查券商真实仓位
         if max_position > 0 and self.manager and hasattr(self.manager, "broker") and self.manager.broker.is_connected:
             real_qty = self.manager.broker.get_available_qty()
-            if real_qty > max_position:
+            # 扣除 OverLimit 仓位占用的股数（超涨停价暂无法卖出，不应算入可用仓位）
+            over_limit_qty = sum(
+                e.qty for e in self.pos_book.entries
+                if e.sell_status == PositionStatus.OVER_LIMIT
+            )
+            effective_qty = real_qty - over_limit_qty
+            if effective_qty > max_position:
                 self._max_position_trigger_count += 1
-                print(f"[错误] 券商可用仓位{real_qty}超过阈值{max_position}，停止买入 (触发{self._max_position_trigger_count}/50)")
+                print(
+                    f"[错误] 券商可用仓位{real_qty}(扣除OverLimit {over_limit_qty}后={effective_qty})"
+                    f"超过阈值{max_position}，停止买入 (触发{self._max_position_trigger_count}/50)"
+                )
                 if self._max_position_trigger_count >= OrderConst.EMERGENCY_TRIGGER_COUNT:
                     self._create_emergency_sell_order()
                     self._max_position_trigger_count = 0
