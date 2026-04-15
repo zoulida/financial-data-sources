@@ -13,6 +13,8 @@ from pathlib import Path
 from datetime import datetime, timedelta
 from typing import List, Dict, Optional
 
+import hashlib
+import pickle
 import numpy as np
 import pandas as pd
 
@@ -33,23 +35,25 @@ except ImportError:
     _FILTER_OK = False
     logger.warning("无法导入 基础筛选.filterStocks，股票池功能不可用")
 
-# ── 导入K线数据源 ──
-# getDayData 优先
+# ── 导入K线数据源（合并下载模块，遵循 .cursorrules 规则） ──
 _GET_DAY_DATA_OK = False
 getDayData = None
 batchDownloadDayData = None
+getDayDataCache = None
 try:
     from source.实盘.xuntou.datadownload.合并下载数据 import (
         getDayData as _getDayData,
         batchDownloadDayData as _batchDownloadDayData,
+        getDayDataCache as _getDayDataCache,
     )
     getDayData = _getDayData
     batchDownloadDayData = _batchDownloadDayData
+    getDayDataCache = _getDayDataCache
     _GET_DAY_DATA_OK = True
 except ImportError:
     pass
 
-# xtdata 兜底
+# xtdata 仅用于股票名称/ST过滤等辅助功能，不用于K线获取
 _XT_OK = False
 try:
     from xtquant import xtdata
@@ -103,90 +107,74 @@ def get_stock_universe() -> pd.DataFrame:
 # 2. K线数据
 # ────────────────────────────────────────────────────────────
 
-def _fetch_day_k_xt(code: str, start_date: str, end_date: str) -> Optional[pd.DataFrame]:
-    """使用 xtdata 获取日K（兜底）。"""
-    if not _XT_OK:
+def fetch_day_k(code: str, start_date: str, end_date: str, use_cache: bool = False) -> Optional[pd.DataFrame]:
+    """
+    获取单只股票日K线（遵循 .cursorrules，统一走合并下载模块）。
+
+    参数:
+        use_cache: True 时使用 getDayDataCache（LRU缓存），适合重复调用
+    """
+    if not _GET_DAY_DATA_OK:
+        logger.warning(f"合并下载模块不可用，无法获取 {code} K线")
         return None
+
     try:
-        try:
-            xtdata.download_history_data(code, "1d", start_date, end_date)
-        except Exception:
-            pass
-        data_dict = xtdata.get_market_data_ex(
-            [], [code], period="1d",
-            start_time=start_date, end_time=end_date,
-            count=-1, dividend_type="front",
-        )
-        if not isinstance(data_dict, dict) or code not in data_dict:
-            return None
-        df = data_dict[code].reset_index().rename(columns={"index": "date"})
-        if "date" in df.columns:
-            df["date"] = df["date"].astype(str)
-        return df
-    except Exception:
-        return None
-
-
-def fetch_day_k(code: str, start_date: str, end_date: str) -> Optional[pd.DataFrame]:
-    """获取单只股票日K线。getDayData 优先，xtdata 兜底。"""
-    if _GET_DAY_DATA_OK and getDayData is not None:
-        try:
+        if use_cache and getDayDataCache is not None:
+            df = getDayDataCache(
+                stock_code=code, start_date=start_date, end_date=end_date,
+            )
+        else:
             df = getDayData(
                 stock_code=code, start_date=start_date,
                 end_date=end_date, is_download=0, dividend_type="front",
             )
-            if df is not None and not df.empty:
+        if df is not None and not df.empty:
+            if "date" in df.columns:
                 df["date"] = df["date"].astype(str)
-                return df
-        except Exception:
-            pass
-    return _fetch_day_k_xt(code, start_date, end_date)
+            return df
+    except Exception as e:
+        logger.debug(f"getDayData({code}) 异常: {e}")
+    return None
 
 
 def fetch_kline_batch(codes: List[str], start_date: str, end_date: str) -> Dict[str, pd.DataFrame]:
     """
-    批量获取K线数据。
+    批量获取K线数据（遵循 .cursorrules，统一走合并下载模块）。
 
     策略：
-      1. xtdata 批量下载 + 获取（最快）
-      2. batchDownloadDayData 读本地缓存补漏
-      3. 逐只 getDayData 兜底（仅处理剩余缺失的）
+      1. batchDownloadDayData(need_download=0) 先读缓存
+      2. 缺失的再 batchDownloadDayData(need_download=1) 下载
+      3. 逐只 getDayData 兜底
     """
+    if not _GET_DAY_DATA_OK:
+        logger.error("合并下载模块不可用，无法获取K线")
+        return {}
+
     result = {}
-    missing = list(codes)
 
-    # ── 方式1：xtdata 批量 ──
-    if _XT_OK:
+    # ── 方式1：batchDownloadDayData 读缓存 ──
+    if batchDownloadDayData is not None:
         try:
-            # 先触发批量下载（异步，不阻塞太久）
-            logger.info(f"xtdata 批量下载 {len(missing)} 只...")
-            try:
-                xtdata.download_history_data2(
-                    missing, "1d", start_date, end_date
-                )
-            except Exception:
-                pass
-            # 批量获取
-            all_data = xtdata.get_market_data_ex(
-                [], missing, period="1d",
-                start_time=start_date, end_time=end_date,
-                count=-1, dividend_type="front",
+            logger.info(f"读取K线缓存 {len(codes)} 只...")
+            batch = batchDownloadDayData(
+                stock_codes=codes, start_date=start_date,
+                end_date=end_date, dividend_type="front", need_download=0,
             )
-            if isinstance(all_data, dict):
-                for code in missing:
-                    df = all_data.get(code)
+            if isinstance(batch, dict):
+                for code, df in batch.items():
                     if df is not None and not df.empty:
-                        df = df.reset_index().rename(columns={"index": "date"})
-                        df = df.sort_values("date").reset_index(drop=True)
+                        if "date" in df.columns:
+                            df = df.sort_values("date").reset_index(drop=True)
                         result[code] = df
-            logger.info(f"xtdata批量获取: {len(result)}/{len(codes)}")
-            missing = [c for c in codes if c not in result]
+            logger.info(f"缓存命中: {len(result)}/{len(codes)}")
         except Exception as e:
-            logger.warning(f"xtdata批量失败: {e}")
+            logger.warning(f"读取缓存失败: {e}")
 
-    # ── 方式2：batchDownloadDayData 读缓存补漏 ──
-    if missing and _GET_DAY_DATA_OK and batchDownloadDayData is not None:
+    # ── 方式2：缺失的批量下载 ──
+    missing = [c for c in codes if c not in result]
+    if missing and batchDownloadDayData is not None:
         try:
+            logger.info(f"下载缺失K线 {len(missing)} 只...")
             batch = batchDownloadDayData(
                 stock_codes=missing, start_date=start_date,
                 end_date=end_date, dividend_type="front", need_download=0,
@@ -194,17 +182,19 @@ def fetch_kline_batch(codes: List[str], start_date: str, end_date: str) -> Dict[
             if isinstance(batch, dict):
                 for code, df in batch.items():
                     if df is not None and not df.empty:
+                        if "date" in df.columns:
+                            df = df.sort_values("date").reset_index(drop=True)
                         result[code] = df
-                logger.info(f"缓存补漏: +{len(batch)}, 总计 {len(result)}/{len(codes)}")
-                missing = [c for c in codes if c not in result]
-        except Exception:
-            pass
+            logger.info(f"下载补漏后: {len(result)}/{len(codes)}")
+        except Exception as e:
+            logger.warning(f"批量下载失败: {e}")
 
-    # ── 方式3：逐只获取（仅剩余缺失的） ──
+    # ── 方式3：逐只 getDayData 兜底 ──
+    missing = [c for c in codes if c not in result]
     if missing:
-        logger.info(f"逐只获取剩余 {len(missing)} 只K线...")
+        logger.info(f"getDayData 逐只补漏 {len(missing)} 只...")
         for i, code in enumerate(missing, 1):
-            if i % 50 == 0:
+            if i % 100 == 0:
                 logger.info(f"  逐只进度: {i}/{len(missing)}")
             df = fetch_day_k(code, start_date, end_date)
             if isinstance(df, pd.DataFrame) and not df.empty:
@@ -220,16 +210,60 @@ def fetch_kline_batch(codes: List[str], start_date: str, end_date: str) -> Dict[
 # ────────────────────────────────────────────────────────────
 
 def _calc_wind_date_range() -> tuple:
-    """计算 Wind 资金流向的起止日期（近 N 个交易日）。"""
-    end_dt = datetime.now()
+    """计算 Wind 资金流向的起止日期（近 N 个交易日）。复用 get_date_range 对齐到最近交易日。"""
+    _, end_date_str, _ = get_date_range()  # YYYYMMDD，已对齐到最近交易日
+    end_dt = datetime.strptime(end_date_str, "%Y%m%d")
     # 往前多推几天，确保覆盖 N 个交易日
     start_dt = end_dt - timedelta(days=WIND_MFD_LOOKBACK_DAYS * 2 + 5)
     return start_dt.strftime("%Y-%m-%d"), end_dt.strftime("%Y-%m-%d")
 
 
+# ── Wind 资金流向缓存目录 ──
+_WIND_CACHE_DIR = Path(__file__).resolve().parents[1].parent / "data" / "cache" / "wind_mfd"
+
+
+def _wind_cache_path(code: str, end_date: str) -> Path:
+    """返回单只股票的 Wind 资金流向缓存文件路径。按 end_date 分目录。"""
+    safe_code = code.replace(".", "_")
+    return _WIND_CACHE_DIR / end_date.replace("-", "") / f"{safe_code}.pkl"
+
+
+def _load_wind_cache(codes: List[str], end_date: str) -> Dict[str, pd.DataFrame]:
+    """从磁盘加载已缓存的 Wind 资金流向数据。"""
+    cached = {}
+    for code in codes:
+        p = _wind_cache_path(code, end_date)
+        if p.exists():
+            try:
+                with open(p, "rb") as f:
+                    df = pickle.load(f)
+                if isinstance(df, pd.DataFrame) and not df.empty:
+                    cached[code] = df
+            except Exception:
+                pass
+    return cached
+
+
+def _save_wind_cache(result: Dict[str, pd.DataFrame], end_date: str) -> None:
+    """将 Wind 资金流向数据按股票粒度写入磁盘缓存。"""
+    for code, df in result.items():
+        if df is None or df.empty:
+            continue
+        p = _wind_cache_path(code, end_date)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            with open(p, "wb") as f:
+                pickle.dump(df, f)
+        except Exception as e:
+            logger.debug(f"Wind 缓存写入失败 {code}: {e}")
+
+
 def fetch_wind_capital_flow(codes: List[str]) -> Dict[str, pd.DataFrame]:
     """
-    通过 Wind Excel 插件批量获取资金流向数据。
+    通过 Wind Excel 插件批量获取资金流向数据（带磁盘缓存）。
+
+    缓存策略：按 end_date + 股票代码 粒度缓存，同一天内不重复查询。
+    中断后重跑可自动续传。
 
     返回:
         dict: {code: DataFrame}，DataFrame 列为 ["date"] + WIND_MFD_FIELDS
@@ -241,11 +275,25 @@ def fetch_wind_capital_flow(codes: List[str]) -> Dict[str, pd.DataFrame]:
     start_date, end_date = _calc_wind_date_range()
     all_result = {}
 
-    # 分批获取
-    for i in range(0, len(codes), WIND_BATCH_SIZE):
-        batch_codes = codes[i:i + WIND_BATCH_SIZE]
+    # ── 读取缓存 ──
+    cached = _load_wind_cache(codes, end_date)
+    if cached:
+        all_result.update(cached)
+        logger.info(f"Wind 缓存命中: {len(cached)}/{len(codes)}")
+
+    # ── 筛选需要下载的 ──
+    missing_codes = [c for c in codes if c not in all_result]
+    if not missing_codes:
+        logger.info(f"Wind 资金流向全部命中缓存, 无需下载")
+        return all_result
+
+    logger.info(f"Wind 需下载: {len(missing_codes)}只 (缓存{len(cached)}只)")
+
+    # ── 分批获取 ──
+    for i in range(0, len(missing_codes), WIND_BATCH_SIZE):
+        batch_codes = missing_codes[i:i + WIND_BATCH_SIZE]
         batch_num = i // WIND_BATCH_SIZE + 1
-        total_batches = (len(codes) + WIND_BATCH_SIZE - 1) // WIND_BATCH_SIZE
+        total_batches = (len(missing_codes) + WIND_BATCH_SIZE - 1) // WIND_BATCH_SIZE
         logger.info(f"Wind 资金流向 批次 {batch_num}/{total_batches}: {len(batch_codes)}只")
 
         try:
@@ -258,6 +306,10 @@ def fetch_wind_capital_flow(codes: List[str]) -> Dict[str, pd.DataFrame]:
                 timeout=WIND_TIMEOUT,
             )
             all_result.update(batch_result)
+            # 每批完成立即写缓存
+            _save_wind_cache(batch_result, end_date)
+            ok_codes = [c for c, df in batch_result.items() if df is not None and len(df) > 0]
+            logger.info(f"Wind 批次 {batch_num} 完成: {len(ok_codes)}/{len(batch_codes)}只有数据, 累计{len(all_result)}只")
         except Exception as e:
             logger.error(f"Wind 批次 {batch_num} 失败: {e}")
             continue

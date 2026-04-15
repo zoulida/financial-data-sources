@@ -57,7 +57,7 @@ data_dict = batchDownloadDayData(
     start_date="20240101",
     end_date="20241231",
     dividend_type='front',
-    need_download=1
+    need_download=0  # 默认读缓存，仅需更新时设为1
 )
 # 返回 dict: {stock_code: DataFrame}
 ```
@@ -68,12 +68,32 @@ df = getDayDataCache(stock_code="600519.SH", start_date="20240101", end_date="20
 # LRU缓存，避免重复计算，参数同 getDayData
 ```
 
+### 2.4 日期范围获取 — `get_date_range`
+
+**统一入口**: `md/获取enddate/get_date_range.py`
+
+```python
+from md.获取enddate.get_date_range import get_date_range, get_date_range_formatted
+
+# 获取 YYYYMMDD 格式
+start_date, end_date, reason = get_date_range()
+# start_date 固定为 "20241101"
+# end_date 自动计算：交易日19点后=当天，否则=上一个交易日
+
+# 获取 YYYY-MM-DD 格式（用于 Wind 公式）
+start_date, end_date, reason = get_date_range_formatted(with_dash=True)
+```
+
+**规则**: 凡是需要 `start_date` / `end_date` 参数的场景，**必须通过此函数获取**，禁止手动硬编码日期。
+
 ### 规则
 1. **所有K线数据必须通过上述函数获取**，禁止直接调用 `xtdata.get_market_data_ex()` 等底层接口获取日K
 2. 少量股票（<100只）用 `getDayData` 循环或 `getDayDataCache`；大批量用 `batchDownloadDayData`
 3. 日期格式统一 `YYYYMMDD` 字符串
 4. 股票代码必须包含市场后缀（`.SH` / `.SZ`）
 5. 默认前复权 `dividend_type='front'`，除非策略明确要求其他复权方式
+6. **日期范围必须通过 `get_date_range()` 获取**，禁止硬编码日期
+7. **下载数据默认读缓存** `need_download=0` / `is_download=0`，仅在明确需要更新数据时才设为 1
 
 ---
 
@@ -141,6 +161,7 @@ df = fetch_wind_formula_to_dataframe(
 | 财务数据（PE/PB/ROE等） | Wind Excel 公式 | `fetch_wind_formula_to_dataframe()` |
 | 基本面数据（行业/股东/股本等） | Wind Excel 公式 | `fetch_wind_formula_to_dataframe()` |
 | 其他特色指标 | Wind Excel 公式 | `fetch_wind_formula_to_dataframe()` |
+| 日期范围（start_date/end_date） | 交易日历 | `get_date_range()` / `get_date_range_formatted()` |
 
 ---
 
@@ -158,6 +179,9 @@ from src.基础筛选.filterStocks import get_universe_with_basics
 # K线数据
 from source.实盘.xuntou.datadownload.合并下载数据 import getDayData, batchDownloadDayData, getDayDataCache
 
+# 日期范围
+from md.获取enddate.get_date_range import get_date_range, get_date_range_formatted
+
 # Wind数据
 from md.winds.通过excel插件.wind_formula_polling import fetch_wind_formula_to_dataframe
 ```
@@ -172,6 +196,7 @@ from md.winds.通过excel插件.wind_formula_polling import fetch_wind_formula_t
 - ❌ 禁止直接调用 `xtdata.get_stock_list_in_sector()` 构建股票池（请用 `get_universe_with_basics()`）
 - ❌ 禁止使用 `from WindPy import w` 直接调用 Wind Python API（请用 Excel 公式轮询方式）
 - ❌ 禁止猜测 Wind 字段名，必须查 `md/winds/merged_fields_fixed.txt`
+- ❌ 禁止硬编码 start_date/end_date 日期，必须用 `get_date_range()` 获取
 
 ---
 

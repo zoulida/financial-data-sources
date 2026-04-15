@@ -18,6 +18,8 @@ import logging
 from pathlib import Path
 from datetime import datetime
 
+from tqdm import tqdm
+
 import pandas as pd
 
 # ── 路径设置 ──
@@ -137,9 +139,7 @@ def run_screener(use_wind: bool = True, top_n: int = TOP_N,
     logger.info(f"第4步：逐只打分 ({len(codes)} 只)")
 
     all_scores = []
-    for idx, code in enumerate(codes, 1):
-        if idx % 200 == 0:
-            logger.info(f"  打分进度: {idx}/{len(codes)}")
+    for code in tqdm(codes, desc="打分进度", ncols=80):
 
         kdf = kline_dict.get(code)
         wdf = wind_data.get(code)

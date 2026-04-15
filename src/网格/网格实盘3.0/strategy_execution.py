@@ -330,20 +330,21 @@ class ExecutionMixin:
 
             # ── pending/BuySubmit：隔日买单已被券商清除 ──
             elif entry.sell_status in (PositionStatus.BUY_SUBMIT, PositionStatus.PENDING):
-                if entry.buy_order_id:
-                    # 有券商单号 → 买单大概率已成交，标记 BuyFilled 等待挂卖单
+                if entry.buy_order_id and entry.buy_trade_id:
+                    # 有券商单号且有成交单号 → 买单确实已成交，标记 BuyFilled 等待挂卖单
                     entry.sell_status = PositionStatus.BUY_FILLED
                     self.write_log(
                         f"隔日仓位处理: {PositionStatus.PENDING}→BuyFilled | "
                         f"仓位ID={entry.entry_id} | 层级={entry.level_index} | "
-                        f"买单号={entry.buy_order_id}"
+                        f"买单号={entry.buy_order_id} | 成交号={entry.buy_trade_id}"
                     )
                     changed = True
                 else:
-                    # 无券商单号 → 买单从未确认，删除
+                    # 无成交单号 → 买单未成交，删除
                     self.write_log(
-                        f"隔日仓位处理: 删除无效买单 | 仓位ID={entry.entry_id} | "
-                        f"层级={entry.level_index} | 状态={entry.sell_status}"
+                        f"隔日仓位处理: 删除未成交买单 | 仓位ID={entry.entry_id} | "
+                        f"层级={entry.level_index} | 状态={entry.sell_status} | "
+                        f"买单号={entry.buy_order_id or '无'} | 成交号={entry.buy_trade_id or '无'}"
                     )
                     self.pos_book.remove_entry(entry.entry_id)
                     changed = True
