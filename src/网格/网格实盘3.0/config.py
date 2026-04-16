@@ -72,6 +72,7 @@ class PositionStatus:
     FILLED      = "filled"       # 卖单已成交（完成一轮交易）
     CANCELLED   = "cancelled"    # 卖单已撤销，需重新挂
     OVER_LIMIT  = "OverLimit"    # 卖出价超过涨停价，暂不挂单，等待价格回升后自动重试
+    ERROR       = "error"        # 连续可用仓位不足等异常导致停止重试
 
 
 # ============================================================

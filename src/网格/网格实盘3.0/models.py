@@ -115,6 +115,9 @@ class PositionEntry:
     sell_level: Optional[int] = None
     sell_local_id: Optional[str] = None
 
+    # —— 运行时计数 ——
+    insufficient_available_count: int = 0  # 连续“券商可用仓位不足”次数（用于熔断）
+
     # ------------------------------------------------------------------
     #  序列化 / 反序列化
     # ------------------------------------------------------------------
@@ -134,6 +137,7 @@ class PositionEntry:
             "sell_price": self.sell_price if self.sell_price is not None else "",
             "sell_level": self.sell_level if self.sell_level is not None else "",
             "sell_local_id": self.sell_local_id or "",
+            "insufficient_available_count": self.insufficient_available_count,
         }
 
     @classmethod
@@ -153,6 +157,7 @@ class PositionEntry:
             sell_price=float(data["sell_price"]) if data.get("sell_price") else None,
             sell_level=int(data["sell_level"]) if data.get("sell_level") else None,
             sell_local_id=data.get("sell_local_id") or None,
+            insufficient_available_count=int(data.get("insufficient_available_count") or 0),
         )
 
 
@@ -192,4 +197,5 @@ POSITION_CSV_FIELDS = [
     "entry_id", "level_index", "buy_price", "qty",
     "buy_time", "buy_date", "buy_order_id", "buy_trade_id",
     "sell_order_id", "sell_status", "sell_price", "sell_level", "sell_local_id",
+    "insufficient_available_count",
 ]

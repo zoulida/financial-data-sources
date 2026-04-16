@@ -71,6 +71,8 @@ class ExecutionMixin:
             broker_available = self.manager.broker.get_available_qty()
 
         over_limit_changed = False
+        insufficient_changed = False
+        insufficient_limit = 20
         over_limit_count = 0          # 本轮被涨停价拦截的数量
         over_limit_total_qty = 0      # 本轮被拦截的总股数
         newly_over_limit_count = 0    # 本轮新标记 OverLimit 的数量
@@ -109,8 +111,25 @@ class ExecutionMixin:
 
             # ── 检查券商可用仓位 ──
             if broker_available < self.hand_size:
-                self.write_log(f"跳过挂卖单: 券商可用仓位不足 | 仓位ID={entry.entry_id} | 可用{broker_available}")
+                entry.insufficient_available_count = int(getattr(entry, "insufficient_available_count", 0)) + 1
+                if entry.insufficient_available_count >= insufficient_limit:
+                    entry.sell_status = PositionStatus.ERROR
+                    self.write_log(
+                        f"挂卖熔断: 连续{entry.insufficient_available_count}次券商可用仓位不足 | "
+                        f"仓位ID={entry.entry_id} | 可用{broker_available} | 状态→error"
+                    )
+                    insufficient_changed = True
+                else:
+                    self.write_log(
+                        f"跳过挂卖单: 券商可用仓位不足 | 仓位ID={entry.entry_id} | 可用{broker_available} | "
+                        f"计数{entry.insufficient_available_count}/{insufficient_limit}"
+                    )
+                    insufficient_changed = True
                 continue
+            else:
+                if getattr(entry, "insufficient_available_count", 0) != 0:
+                    entry.insufficient_available_count = 0
+                    insufficient_changed = True
 
             # ── 检查网格范围 ──
             if not self.spec.is_in_range(sell_level):
@@ -126,6 +145,9 @@ class ExecutionMixin:
             # ── 挂卖单 ──
             order_id = self._execute_sell_for_entry(entry, sell_price, actual_qty)
             if order_id:
+                if getattr(entry, "insufficient_available_count", 0) != 0:
+                    entry.insufficient_available_count = 0
+                    insufficient_changed = True
                 self.pos_book.set_sell_order(entry.entry_id, order_id, sell_price, sell_level)
                 if actual_qty < entry.qty:
                     entry.qty -= actual_qty
@@ -144,7 +166,7 @@ class ExecutionMixin:
                 + (f" | 新标记{newly_over_limit_count}笔→OverLimit" if newly_over_limit_count > 0 else "")
             )
 
-        if over_limit_changed:
+        if over_limit_changed or insufficient_changed:
             self.pos_book.save_to_csv()
 
     def _execute_sell_for_entry(self, entry, sell_price: float, qty: int) -> Optional[str]:
