@@ -51,9 +51,12 @@ class DecisionMixin:
 
         # ── 2. 补全缺失的 buy_order_id ──
         # 买单下了但本地没记住券商订单号，从未成交列表按价格匹配回填
+        # 未匹配到的再从全量订单（含已成交）中查找
         # 必须在步骤3之前执行，否则 sync_buy_order_status 无法匹配订单
-        if unfilled_orders:
-            self.order_mgr.fill_missing_buy_order_ids(unfilled_orders, stock_code)
+        if unfilled_orders or all_orders:
+            self.order_mgr.fill_missing_buy_order_ids(
+                unfilled_orders, stock_code, all_orders=all_orders
+            )
 
         # ── 3. 同步仓位状态（买单/卖单成交确认 + 挂卖单） ──
         self._check_positions_on_tick(all_orders)

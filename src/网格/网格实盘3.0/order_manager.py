@@ -495,12 +495,14 @@ class OrderManager:
         return updated
 
     def fill_missing_buy_order_ids(
-        self, unfilled_orders: List[dict], stock_code: str
+        self, unfilled_orders: List[dict], stock_code: str,
+        all_orders: Optional[List[dict]] = None,
     ) -> bool:
         """
         补全缺失的 buy_order_id
 
-        检查 pending 且无 buy_order_id 的仓位，通过券商 order_remark 匹配 entry_id
+        检查无 buy_order_id 的仓位，通过券商 order_remark 匹配 entry_id
+        先从未成交订单匹配，未匹配到的再从全量订单（含已成交）中查找
 
         Returns:
             是否有更新
@@ -514,20 +516,33 @@ class OrderManager:
 
         self._log(f"[订单补全] 发现{len(entries)}条缺少buy_order_id的记录")
 
-        # 从未成交订单中构建 entry_id → order_id 映射
-        entry_to_order: Dict[str, str] = {}
-        for order in unfilled_orders:
-            if not match_stock_code(order.get("stock_code", ""), stock_code):
-                continue
-            if order.get("order_type") != OrderType.BUY:
-                continue
-            remark = order.get("order_remark", "")
-            if remark.startswith("BUY_"):
-                extracted_id = remark[4:]
-            else:
-                extracted_id = remark
-            if extracted_id:
-                entry_to_order[extracted_id] = str(order.get("order_id"))
+        # 从订单中构建 entry_id → order_id 映射的辅助函数
+        def _build_mapping(orders: List[dict]) -> Dict[str, str]:
+            mapping: Dict[str, str] = {}
+            for order in orders:
+                if not match_stock_code(order.get("stock_code", ""), stock_code):
+                    continue
+                if order.get("order_type") != OrderType.BUY:
+                    continue
+                remark = order.get("order_remark", "")
+                if remark.startswith("BUY_"):
+                    extracted_id = remark[4:]
+                else:
+                    extracted_id = remark
+                if extracted_id:
+                    mapping[extracted_id] = str(order.get("order_id"))
+            return mapping
+
+        # 先从未成交订单匹配
+        entry_to_order = _build_mapping(unfilled_orders)
+
+        # 未匹配到的，从全量订单（含已成交）中查找
+        still_missing = [e for e in entries if e.entry_id not in entry_to_order]
+        if still_missing and all_orders:
+            all_mapping = _build_mapping(all_orders)
+            for k, v in all_mapping.items():
+                if k not in entry_to_order:
+                    entry_to_order[k] = v
 
         # 更新
         count = 0
@@ -541,6 +556,7 @@ class OrderManager:
 
         if count > 0:
             self._log(f"[订单补全] 已更新{count}条记录")
+            self.pos_book.save_to_csv()
         return count > 0
 
     # ==============================================================

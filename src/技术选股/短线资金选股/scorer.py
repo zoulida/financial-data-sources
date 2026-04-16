@@ -50,18 +50,42 @@ def _percentile_score(value: float, all_values: pd.Series, max_score: float) -> 
     return round(rank * max_score, 2)
 
 
+def _latest_amount(df: Optional[pd.DataFrame], offset: int = 0) -> float:
+    """获取最近第 offset 天成交额。offset=0 表示最新，1 表示前一日。"""
+    if df is None or "amount" not in df.columns:
+        return np.nan
+    amt = pd.to_numeric(df["amount"], errors="coerce").dropna()
+    if len(amt) <= offset:
+        return np.nan
+    return float(amt.iloc[-1 - offset])
+
+
+def _sum_amount(df: Optional[pd.DataFrame], window: int) -> float:
+    """获取最近 window 天成交额累计。"""
+    if df is None or "amount" not in df.columns:
+        return np.nan
+    amt = pd.to_numeric(df["amount"], errors="coerce").dropna().tail(window)
+    if amt.empty:
+        return np.nan
+    return float(amt.sum())
+
+
 # ════════════════════════════════════════════════════════════
 # 维度1：资金流向（30分）
 # ════════════════════════════════════════════════════════════
 
 def score_capital_flow(wind_df: Optional[pd.DataFrame],
-                       all_wind_data: Dict[str, pd.DataFrame]) -> Dict[str, float]:
+                       all_wind_data: Dict[str, pd.DataFrame],
+                       kline_df: Optional[pd.DataFrame],
+                       all_kline_data: Dict[str, pd.DataFrame]) -> Dict[str, float]:
     """
     资金流向维度打分。
 
     参数:
         wind_df: 单只股票的 Wind 资金流向 DataFrame (date + mfd字段)
         all_wind_data: 全池 Wind 数据，用于计算排名分位
+        kline_df: 单只股票的日K线数据，用于成交额归一化
+        all_kline_data: 全池日K线数据，用于成交额归一化后的横向比较
 
     返回:
         dict: 各子因子分数 + 维度总分
@@ -82,27 +106,36 @@ def score_capital_flow(wind_df: Optional[pd.DataFrame],
     if mfd_col in wind_df.columns:
         recent3 = wind_df[mfd_col].dropna().tail(3)
         cum_3d = recent3.sum() if len(recent3) > 0 else 0.0
+        amt_3d = _sum_amount(kline_df, 3)
+        norm_cum_3d = cum_3d / amt_3d if pd.notna(amt_3d) and amt_3d > 0 else np.nan
 
         # 计算全池分位
         all_cum_3d = []
         for code, wdf in all_wind_data.items():
             if wdf is not None and mfd_col in wdf.columns:
                 r3 = wdf[mfd_col].dropna().tail(3)
-                all_cum_3d.append(r3.sum() if len(r3) > 0 else 0.0)
+                raw_cum_3d = r3.sum() if len(r3) > 0 else 0.0
+                kdf = all_kline_data.get(code)
+                raw_amt_3d = _sum_amount(kdf, 3)
+                all_cum_3d.append(raw_cum_3d / raw_amt_3d if pd.notna(raw_amt_3d) and raw_amt_3d > 0 else np.nan)
         all_series = pd.Series(all_cum_3d)
-        result["mfd_3d_score"] = _percentile_score(cum_3d, all_series, SCORE_MFD_3D_MAX)
+        result["mfd_3d_score"] = _percentile_score(norm_cum_3d, all_series, SCORE_MFD_3D_MAX)
 
     # ── 今日尾盘主力净流入 ──
     close_col = "mfd_inflow_close_m"
     if close_col in wind_df.columns:
         latest_close = wind_df[close_col].dropna().iloc[-1] if not wind_df[close_col].dropna().empty else 0.0
+        latest_amt = _latest_amount(kline_df)
+        norm_latest_close = latest_close / latest_amt if pd.notna(latest_amt) and latest_amt > 0 else np.nan
         all_close = []
         for code, wdf in all_wind_data.items():
             if wdf is not None and close_col in wdf.columns:
                 v = wdf[close_col].dropna().iloc[-1] if not wdf[close_col].dropna().empty else 0.0
-                all_close.append(v)
+                kdf = all_kline_data.get(code)
+                raw_amt = _latest_amount(kdf)
+                all_close.append(v / raw_amt if pd.notna(raw_amt) and raw_amt > 0 else np.nan)
         result["mfd_close_score"] = _percentile_score(
-            latest_close, pd.Series(all_close), SCORE_MFD_CLOSE_MAX
+            norm_latest_close, pd.Series(all_close), SCORE_MFD_CLOSE_MAX
         )
 
     # ── 主力净流入率 ──
@@ -122,13 +155,17 @@ def score_capital_flow(wind_df: Optional[pd.DataFrame],
     active_col = "mfd_netbuyamt_a"
     if active_col in wind_df.columns:
         latest_active = wind_df[active_col].dropna().iloc[-1] if not wind_df[active_col].dropna().empty else 0.0
+        latest_amt = _latest_amount(kline_df)
+        norm_latest_active = latest_active / latest_amt if pd.notna(latest_amt) and latest_amt > 0 else np.nan
         all_active = []
         for code, wdf in all_wind_data.items():
             if wdf is not None and active_col in wdf.columns:
                 v = wdf[active_col].dropna().iloc[-1] if not wdf[active_col].dropna().empty else 0.0
-                all_active.append(v)
+                kdf = all_kline_data.get(code)
+                raw_amt = _latest_amount(kdf)
+                all_active.append(v / raw_amt if pd.notna(raw_amt) and raw_amt > 0 else np.nan)
         result["mfd_active_score"] = _percentile_score(
-            latest_active, pd.Series(all_active), SCORE_MFD_ACTIVE_MAX
+            norm_latest_active, pd.Series(all_active), SCORE_MFD_ACTIVE_MAX
         )
 
     result["capital_flow_total"] = round(
@@ -441,6 +478,7 @@ def score_stock(code: str,
                 kline_df: pd.DataFrame,
                 wind_df: Optional[pd.DataFrame],
                 all_wind_data: Dict[str, pd.DataFrame],
+                all_kline_data: Dict[str, pd.DataFrame],
                 market_cap: float,
                 is_st: bool = False,
                 wind_available: bool = True) -> Dict[str, float]:
@@ -452,6 +490,7 @@ def score_stock(code: str,
         kline_df: 日K线 DataFrame
         wind_df: Wind 资金流向 DataFrame (可为 None)
         all_wind_data: 全池 Wind 数据（用于排名分位）
+        all_kline_data: 全池日K线数据（用于成交额归一化）
         market_cap: 流通市值（亿元）
         is_st: 是否ST
         wind_available: Wind 是否可用
@@ -462,7 +501,7 @@ def score_stock(code: str,
     result = {"code": code}
 
     # ── 各维度打分 ──
-    cap_scores = score_capital_flow(wind_df, all_wind_data)
+    cap_scores = score_capital_flow(wind_df, all_wind_data, kline_df, all_kline_data)
     vol_scores = score_volume_price(kline_df)
     tech_scores = score_technical(kline_df)
     chip_scores = score_chip_structure(kline_df)
