@@ -48,7 +48,7 @@ def _has_effective_data(matrix):
     return False
 
 
-def fetch_wind_formula_to_dataframe(formula, timeout=30, interval=0.2, visible=False):
+def fetch_wind_formula_to_dataframe(formula, timeout=15, interval=0.2, visible=False):
     """
     执行一个 Wind Excel 公式，轮询等待结果，并返回 DataFrame。
 
@@ -99,7 +99,7 @@ def fetch_wind_formula_to_dataframe(formula, timeout=30, interval=0.2, visible=F
 
 
 if __name__ == "__main__":
-    formula = '=WSD("600000.SH","CLOSE","2025-01-01","2026-04-01")'
+    formula = '=WSD("600006.SH","CLOSE,windcode,sec_name","2025-01-01","2026-04-16")'
     df = fetch_wind_formula_to_dataframe(formula)
     print(df)
 

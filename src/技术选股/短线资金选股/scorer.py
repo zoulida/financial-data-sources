@@ -121,25 +121,21 @@ def score_capital_flow(wind_df: Optional[pd.DataFrame],
         all_series = pd.Series(all_cum_3d)
         result["mfd_3d_score"] = _percentile_score(norm_cum_3d, all_series, SCORE_MFD_3D_MAX)
 
-    # ── 今日尾盘主力净流入 ──
-    close_col = "mfd_inflow_close_m"
+    # ── 尾盘净流入率（金额） ──
+    close_col = "mfd_inflowrate_close_m"
     if close_col in wind_df.columns:
         latest_close = wind_df[close_col].dropna().iloc[-1] if not wind_df[close_col].dropna().empty else 0.0
-        latest_amt = _latest_amount(kline_df)
-        norm_latest_close = latest_close / latest_amt if pd.notna(latest_amt) and latest_amt > 0 else np.nan
         all_close = []
         for code, wdf in all_wind_data.items():
             if wdf is not None and close_col in wdf.columns:
                 v = wdf[close_col].dropna().iloc[-1] if not wdf[close_col].dropna().empty else 0.0
-                kdf = all_kline_data.get(code)
-                raw_amt = _latest_amount(kdf)
-                all_close.append(v / raw_amt if pd.notna(raw_amt) and raw_amt > 0 else np.nan)
+                all_close.append(v)
         result["mfd_close_score"] = _percentile_score(
-            norm_latest_close, pd.Series(all_close), SCORE_MFD_CLOSE_MAX
+            latest_close, pd.Series(all_close), SCORE_MFD_CLOSE_MAX
         )
 
-    # ── 主力净流入率 ──
-    rate_col = "mfd_inflowrate_m"
+    # ── 净流入额占成交额比 ──
+    rate_col = "mfd_inflowproportion_a"
     if rate_col in wind_df.columns:
         latest_rate = wind_df[rate_col].dropna().iloc[-1] if not wind_df[rate_col].dropna().empty else 0.0
         all_rate = []
@@ -151,8 +147,8 @@ def score_capital_flow(wind_df: Optional[pd.DataFrame],
             latest_rate, pd.Series(all_rate), SCORE_MFD_RATE_MAX
         )
 
-    # ── 净主动买入额 ──
-    active_col = "mfd_netbuyamt_a"
+    # ── 主力净流入额 ──
+    active_col = "mfd_netbuyamt"
     if active_col in wind_df.columns:
         latest_active = wind_df[active_col].dropna().iloc[-1] if not wind_df[active_col].dropna().empty else 0.0
         latest_amt = _latest_amount(kline_df)

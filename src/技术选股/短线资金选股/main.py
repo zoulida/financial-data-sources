@@ -16,7 +16,7 @@ import time
 import argparse
 import logging
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from tqdm import tqdm
 
@@ -39,7 +39,7 @@ from 技术选股.短线资金选股.data_fetcher import (
     filter_st_stocks,
     get_date_range,
 )
-from 技术选股.短线资金选股.wind_client import is_wind_available
+from md.winds.通过excel插件.wind_client import is_wind_available
 from 技术选股.短线资金选股.scorer import score_stock
 
 # ── 日志配置 ──

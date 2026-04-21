@@ -6,8 +6,8 @@
 - start_date 永远为 "20241101"
 - end_date 逻辑：
   1. 如果当天是交易日：
-     - 21点之后：end_date 为当天日期
-     - 21点之前：end_date 为上一个交易日
+     - 19点之后：end_date 为当天日期
+     - 19点之前：end_date 为上一个交易日
   2. 如果当天不是交易日：end_date 为上一个交易日
 """
 
@@ -50,13 +50,13 @@ def get_date_range():
     if is_trading_day:
         # 今天是交易日
         if current_hour >= 19:
-            # 21点之后，使用当天日期
+            # 19点之后，使用当天日期
             end_date = today_str
-            reason = "今天是交易日且已过21点"
+            reason = "今天是交易日且已过19点"
         else:
-            # 21点之前，使用上一个交易日
+            # 19点之前，使用上一个交易日
             end_date = getLastOpenDay(today_str)
-            reason = "今天是交易日但未到21点"
+            reason = "今天是交易日但未到19点"
     else:
         # 今天不是交易日，使用上一个交易日
         end_date = getLastOpenDay(today_str)

@@ -38,15 +38,19 @@ except ImportError:
 # ── 导入K线数据源（合并下载模块，遵循 .cursorrules 规则） ──
 _GET_DAY_DATA_OK = False
 getDayData = None
+getDayDataWithTimeout = None
 batchDownloadDayData = None
 getDayDataCache = None
 try:
-    from source.实盘.xuntou.datadownload.合并下载数据 import (
+    #from source.实盘.xuntou.datadownload.合并下载数据 import (
+    from md.合并下载数据.合并下载数据 import (    
         getDayData as _getDayData,
+        getDayDataWithTimeout as _getDayDataWithTimeout,
         batchDownloadDayData as _batchDownloadDayData,
         getDayDataCache as _getDayDataCache,
     )
     getDayData = _getDayData
+    getDayDataWithTimeout = _getDayDataWithTimeout
     batchDownloadDayData = _batchDownloadDayData
     getDayDataCache = _getDayDataCache
     _GET_DAY_DATA_OK = True
@@ -71,8 +75,8 @@ except ImportError:
         return start.strftime("%Y%m%d"), end.strftime("%Y%m%d"), "fallback"
 
 # ── Wind 客户端 ──
-from 技术选股.短线资金选股.wind_client import (
-    fetch_wsd_batch,
+from md.winds.通过excel插件.wind_client import (
+    fetch_multi_fields_wsd,
     is_wind_available,
 )
 from 技术选股.短线资金选股.config import (
@@ -124,7 +128,8 @@ def fetch_day_k(code: str, start_date: str, end_date: str, use_cache: bool = Fal
                 stock_code=code, start_date=start_date, end_date=end_date,
             )
         else:
-            df = getDayData(
+            fetch_func = getDayDataWithTimeout if getDayDataWithTimeout is not None else getDayData
+            df = fetch_func(
                 stock_code=code, start_date=start_date,
                 end_date=end_date, is_download=0, dividend_type="front",
             )
@@ -297,12 +302,11 @@ def fetch_wind_capital_flow(codes: List[str]) -> Dict[str, pd.DataFrame]:
         logger.info(f"Wind 资金流向 批次 {batch_num}/{total_batches}: {len(batch_codes)}只")
 
         try:
-            batch_result = fetch_wsd_batch(
+            batch_result = fetch_multi_fields_wsd(
                 codes=batch_codes,
                 fields=WIND_MFD_FIELDS,
                 start_date=start_date,
                 end_date=end_date,
-                options="ruleType=10;unit=1",
                 timeout=WIND_TIMEOUT,
             )
             all_result.update(batch_result)

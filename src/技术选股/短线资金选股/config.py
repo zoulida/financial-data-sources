@@ -19,13 +19,13 @@ KLINE_DAYS = 120        # 获取K线天数
 
 # ── Wind 资金流向 ──
 WIND_MFD_FIELDS = [
-    "mfd_inflow_m",           # 主力净流入额
-    "mfd_inflow_close_m",     # 尾盘主力净流入额
-    "mfd_inflowrate_m",       # 主力净流入率（金额）
-    "mfd_netbuyamt_a",        # 净主动买入额
+    "mfd_netbuyamt",           # 主力净流入额
+    "mfd_inflowproportion_a",  # 净流入额占成交额比
+    "mfd_inflowrate_close_m",  # 尾盘净流入率（金额）
+    "mfd_inflow_m",            # 主力净流入额
 ]
 WIND_MFD_LOOKBACK_DAYS = 5   # 资金流向回看天数
-WIND_BATCH_SIZE = 50          # 每批Wind查询股票数
+WIND_BATCH_SIZE = 25          # 每批Wind查询股票数
 WIND_TIMEOUT = 60             # Wind Excel轮询超时（秒）
 
 # ── 维度权重（总分100） ──
