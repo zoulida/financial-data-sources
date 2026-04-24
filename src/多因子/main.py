@@ -1,6 +1,10 @@
 from __future__ import annotations
 
 import importlib
+import sys
+import threading
+import time
+from collections.abc import Callable
 from pathlib import Path
 
 import tkinter as tk
@@ -211,13 +215,23 @@ def _compute_registered_factor(factor_name: str, data_bundle: dict[str, object])
     return compute_func(*args)
 
 
+def _configure_scrollable_frame(canvas: tk.Canvas, scroll_frame: ttk.Frame) -> None:
+    """配置滚动容器，避免 lambda 捕获导致的类型告警。"""
+
+    def _on_configure(event: tk.Event[tk.Misc]) -> None:
+        del event
+        canvas.configure(scrollregion=canvas.bbox("all"))
+
+    scroll_frame.bind("<Configure>", _on_configure)
+
+
 class Alpha158SelectionDialog:
     """Alpha158 因子单独选择窗口。"""
 
     def __init__(self, selected_factors: list[str] | None = None) -> None:
         self.result: list[str] | None = None
         self.selected_factors = set(selected_factors or [])
-        self.alpha_factor_names = [name for name, spec in FACTOR_REGISTRY.items() if spec.get("group") == "alpha158"]
+        self.alpha_factor_names = _iter_factor_names("alpha158")
 
         self.root = tk.Toplevel()
         self.root.title("选择 Alpha158 因子")
@@ -245,10 +259,7 @@ class Alpha158SelectionDialog:
         canvas = tk.Canvas(container, width=560, height=500, highlightthickness=0)
         scrollbar = ttk.Scrollbar(container, orient="vertical", command=canvas.yview)
         scroll_frame = ttk.Frame(canvas)
-        scroll_frame.bind(
-            "<Configure>",
-            lambda event: canvas.configure(scrollregion=canvas.bbox("all")),
-        )
+        _configure_scrollable_frame(canvas, scroll_frame)
         canvas.create_window((0, 0), window=scroll_frame, anchor="nw")
         canvas.configure(yscrollcommand=scrollbar.set)
         canvas.pack(side="left", fill="both", expand=True)
@@ -260,7 +271,7 @@ class Alpha158SelectionDialog:
             self.factor_vars[factor_name] = var
             ttk.Checkbutton(
                 scroll_frame,
-                text=f"{factor_name}（{FACTOR_LABELS[factor_name]}）",
+                text=_make_label_text(factor_name),
                 variable=var,
             ).grid(row=row_index, column=0, sticky="w", pady=2)
 
@@ -307,15 +318,29 @@ class Alpha158SelectionDialog:
         return self.result
 
 
+def _iter_factor_names(group: str | None = None) -> list[str]:
+    """按分组返回注册因子名称列表。"""
+    factor_names: list[str] = []
+    for name, spec in FACTOR_REGISTRY.items():
+        current_group = spec.get("group")
+        if group is not None and current_group != group:
+            continue
+        factor_names.append(name)
+    return factor_names
+
+
+def _make_label_text(factor_name: str) -> str:
+    """构造界面显示用的因子名称。"""
+    return f"{factor_name}（{FACTOR_LABELS[factor_name]}）"
+
+
 class StrategyRunDialog:
     """运行前弹出参数选择窗口。"""
 
     def __init__(self) -> None:
         self.result: dict[str, object] | None = None
         default_start, default_end, _ = get_strategy_date_range()
-        self.selected_alpha158_factors = [
-            name for name, spec in FACTOR_REGISTRY.items() if spec.get("group") == "alpha158"
-        ]
+        self.selected_alpha158_factors = _iter_factor_names("alpha158")
 
         self.root = tk.Tk()
         self.root.title("多因子运行参数")
@@ -351,11 +376,11 @@ class StrategyRunDialog:
         self.factor_vars: dict[str, tk.BooleanVar] = {}
         factor_check_frame = ttk.Frame(factor_section)
         factor_check_frame.pack(anchor="w")
-        base_factor_names = [name for name, spec in FACTOR_REGISTRY.items() if spec.get("group") == "base"]
+        base_factor_names = _iter_factor_names("base")
         for row_index, factor_name in enumerate(base_factor_names):
             var = tk.BooleanVar(value=True)
             self.factor_vars[factor_name] = var
-            factor_text = f"{factor_name}（{FACTOR_LABELS[factor_name]}）"
+            factor_text = _make_label_text(factor_name)
             ttk.Checkbutton(factor_check_frame, text=factor_text, variable=var).grid(
                 row=row_index,
                 column=0,
@@ -420,7 +445,7 @@ class StrategyRunDialog:
             var.set(not var.get())
 
     def _build_alpha158_summary(self) -> str:
-        total_count = len([name for name, spec in FACTOR_REGISTRY.items() if spec.get("group") == "alpha158"])
+        total_count = len(_iter_factor_names("alpha158"))
         selected_count = len(self.selected_alpha158_factors)
         return f"已选择 {selected_count} / {total_count} 个因子"
 
@@ -605,6 +630,62 @@ def _print_stage_table(title: str, df: pd.DataFrame) -> None:
     _print_separator("-", 90)
 
 
+class StrategyProgressDialog:
+    """运行开始前的提示窗口。"""
+
+    def __init__(self) -> None:
+        self.root = tk.Tk()
+        self.root.title("多因子运行提示")
+        self.root.resizable(False, False)
+        self.root.protocol("WM_DELETE_WINDOW", lambda: None)
+        self._center_window(520, 180)
+
+        container = ttk.Frame(self.root, padding=18)
+        container.pack(fill="both", expand=True)
+
+        ttk.Label(container, text="配置已确认，准备开始运行", font=("Microsoft YaHei", 14, "bold")).pack(anchor="w")
+        ttk.Label(
+            container,
+            text="运行进度将打印到控制台，请查看终端输出。此提示窗口会自动关闭。",
+            foreground="#666666",
+        ).pack(anchor="w", pady=(10, 12))
+
+        self.progress = ttk.Progressbar(container, mode="indeterminate", length=460)
+        self.progress.pack(anchor="w")
+        self.progress.start(12)
+
+    def _center_window(self, width: int, height: int) -> None:
+        self.root.update_idletasks()
+        screen_width = self.root.winfo_screenwidth()
+        screen_height = self.root.winfo_screenheight()
+        x = max((screen_width - width) // 2, 0)
+        y = max((screen_height - height) // 2, 0)
+        self.root.geometry(f"{width}x{height}+{x}+{y}")
+
+    def close(self) -> None:
+        self.progress.stop()
+        self.root.destroy()
+
+
+def _print_console_progress(
+    title: str,
+    detail: str,
+    current: int | None = None,
+    total: int | None = None,
+) -> None:
+    """把运行进度打印到控制台。"""
+    if current is not None and total is not None and total > 0:
+        bar_length = 24
+        filled = int(bar_length * current / total)
+        bar = "#" * filled + "-" * (bar_length - filled)
+        percent = current / total * 100
+        message = f"[进度] {title} | [{bar}] {current}/{total} ({percent:.1f}%) | {detail}"
+    else:
+        message = f"[进度] {title} | {detail}"
+    print(message)
+    sys.stdout.flush()
+
+
 def _get_run_params() -> dict[str, object] | None:
     """弹出运行参数窗口，返回用户选择结果。"""
     dialog = StrategyRunDialog()
@@ -616,6 +697,7 @@ def run_strategy(
     end_date: str | None = None,
     max_stage: int = 4,
     selected_factors: list[str] | None = None,
+    progress_callback: Callable[[str, str, int | None, int | None], None] | None = None,
 ) -> dict[str, object]:
     """运行多因子研究与回测主流程。"""
     if max_stage < 1 or max_stage > 4:
@@ -625,6 +707,18 @@ def run_strategy(
         selected_factors = list(FACTOR_LABELS.keys())
     if not selected_factors:
         raise ValueError("selected_factors 不能为空")
+
+    def report_progress(
+        title: str,
+        detail: str,
+        current: int | None = None,
+        total: int | None = None,
+    ) -> None:
+        _print_console_progress(title, detail, current, total)
+        if progress_callback is not None:
+            progress_callback(title, detail, current, total)
+
+    report_progress("阶段0：加载数据", "正在加载股票池、行情和基准数据...")
 
     _print_separator("=", 90)
     print("[阶段0] 开始加载数据与准备基础输入...")
@@ -658,7 +752,14 @@ def run_strategy(
     )
 
     all_factor_dict = {}
-    for factor_name in selected_factors:
+    total_factors = len(selected_factors)
+    for factor_index, factor_name in enumerate(selected_factors, start=1):
+        report_progress(
+            "阶段0：计算候选因子",
+            f"正在计算 {factor_name} ...",
+            factor_index,
+            total_factors,
+        )
         all_factor_dict[factor_name] = _compute_registered_factor(factor_name, data_bundle)
     raw_factor_dict = {name: all_factor_dict[name] for name in selected_factors if name in all_factor_dict}
     if not raw_factor_dict:
@@ -671,11 +772,18 @@ def run_strategy(
     _print_separator("=", 90)
     print("[阶段1] 开始逐个评估候选因子...")
     _print_separator("=", 90)
+    report_progress("阶段1：评估候选因子", "正在计算 IC / RankIC / RR 和单因子回测...", 0, len(raw_factor_dict))
     factor_analysis: dict[str, dict[str, object]] = {}
     candidate_metrics_list: list[pd.DataFrame] = []
     candidate_factor_scores: dict[str, pd.DataFrame] = {}
 
-    for factor_name, raw_factor_df in raw_factor_dict.items():
+    for factor_index, (factor_name, raw_factor_df) in enumerate(raw_factor_dict.items(), start=1):
+        report_progress(
+            "阶段1：评估候选因子",
+            f"正在评估 {factor_name} ...",
+            factor_index,
+            len(raw_factor_dict),
+        )
         masked_factor_df = mask_factor(raw_factor_df, tradable_mask)
         factor_score_df = rank_score(masked_factor_df, ascending=FACTOR_DIRECTIONS.get(factor_name, False))
 
@@ -750,6 +858,7 @@ def run_strategy(
     _print_separator("=", 90)
     print("[阶段2] 开始根据 IC / IR / RR 阈值做初筛...")
     _print_separator("=", 90)
+    report_progress("阶段2：指标初筛", "正在根据阈值筛选候选因子...")
     candidate_status_df = _build_candidate_status(candidate_metrics_df)
     if "备注" not in candidate_status_df.columns:
         candidate_status_df["备注"] = ""
@@ -792,6 +901,7 @@ def run_strategy(
     _print_separator("=", 90)
     print("[阶段3] 开始做因子相关性分析与去冗余...")
     _print_separator("=", 90)
+    report_progress("阶段3：相关性去冗余", "正在分析因子相关性并保留优先级更高的因子...")
     final_factor_names, corr_matrix_df, corr_pairs_df, final_selection_df = _deduplicate_by_correlation(
         screened_factor_scores=screened_factor_scores,
         screened_metrics_df=screened_metrics_df,
@@ -830,6 +940,7 @@ def run_strategy(
     _print_separator("=", 90)
     print("[阶段4] 开始构建最终多因子组合并回测...")
     _print_separator("=", 90)
+    report_progress("阶段4：组合构建与回测", "正在合成最终分数并运行回测...")
     final_weights = {factor_name: 1.0 / len(final_factor_names) for factor_name in final_factor_names}
     selected_factor_scores = {name: candidate_factor_scores[name] for name in final_factor_names}
     score_df = combine_factor_scores(selected_factor_scores, final_weights)
@@ -862,6 +973,13 @@ def run_strategy(
     save_stage_results(stage_results, str(output_dir))
     save_selection_results(selection_df, score_df, str(output_dir))
     save_backtest_results(results, str(output_dir))
+    print(f"[阶段4] 已保存阶段结果目录：{output_dir / 'factor_selection'}")
+    print(f"[阶段4] 已保存选股矩阵 CSV：{output_dir / 'selection_matrix.csv'}")
+    print(f"[阶段4] 已保存综合分数 CSV：{output_dir / 'score_matrix.csv'}")
+    print(f"[阶段4] 已保存入选股票 CSV：{output_dir / 'selected_stocks.csv'}")
+    print(f"[阶段4] 已保存组合统计 CSV：{output_dir / 'portfolio_stats.csv'}")
+    print(f"[阶段4] 已保存净值曲线 CSV：{output_dir / 'equity_curve.csv'}")
+    print(f"[阶段4] 已保存收益序列 CSV：{output_dir / 'returns.csv'}")
     for factor_name, factor_result in factor_analysis.items():
         save_factor_evaluation_results(
             output_dir=str(output_dir),
@@ -872,6 +990,11 @@ def run_strategy(
             summary_df=factor_result["summary_df"],
             backtest_results=factor_result["single_factor_results"],
         )
+        factor_output_dir = output_dir / "factor_analysis" / factor_name / "latest"
+        print(f"[阶段4] 已保存单因子分析目录：{factor_output_dir}")
+        print(f"[阶段4]   - 指标汇总 CSV：{factor_output_dir / 'summary.csv'}")
+        print(f"[阶段4]   - IC/RR 时序 CSV：{factor_output_dir / 'ic_ir_rr_timeseries.csv'}")
+        print(f"[阶段4]   - 单因子统计 CSV：{factor_output_dir / 'single_factor_stats.csv'}")
 
     print(f"[阶段4] 组合构建完成：最终因子={', '.join(final_factor_names)}")
     print(f"[阶段4] 对应权重：{final_weights}")
@@ -903,12 +1026,33 @@ if __name__ == "__main__":
     if run_params is None:
         print("已取消本次运行")
     else:
-        summary = run_strategy(
-            start_date=str(run_params["start_date"]),
-            end_date=str(run_params["end_date"]),
-            max_stage=int(run_params["max_stage"]),
-            selected_factors=list(run_params["selected_factors"]),
-        )
+        progress_dialog = StrategyProgressDialog()
+        progress_dialog.root.after(800, progress_dialog.close)
+        progress_dialog.root.mainloop()
+
+        run_result: dict[str, object] = {}
+        run_error_holder: list[Exception] = []
+
+        def _run_task() -> None:
+            try:
+                run_result["summary"] = run_strategy(
+                    start_date=str(run_params["start_date"]),
+                    end_date=str(run_params["end_date"]),
+                    max_stage=int(run_params["max_stage"]),
+                    selected_factors=list(run_params["selected_factors"]),
+                    progress_callback=None,
+                )
+            except Exception as exc:  # pragma: no cover - 运行期异常展示
+                run_error_holder.append(exc)
+
+        worker = threading.Thread(target=_run_task, daemon=True)
+        worker.start()
+        worker.join()
+
+        if run_error_holder:
+            raise run_error_holder[0]
+
+        summary = run_result["summary"]
         _print_separator("=", 90)
         print("多因子回测完成")
         _print_separator("=", 90)
