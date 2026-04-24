@@ -184,11 +184,14 @@ def run_screener(use_wind: bool = True, top_n: int = TOP_N,
     # 取前N
     top_df = result_df.head(top_n).copy()
 
-    # 输出关键列摘要
+    # ── 输出关键列摘要
     summary_cols = [
         "code", "name", "market_cap", "total_score",
-        "capital_flow_total", "volume_price_total",
-        "technical_total", "chip_total", "fundamental_total",
+        "capital_flow_total", "flow_14d_score", "flow_accel_score",
+        "flow_stability_score", "flow_prebreak_score",
+        "volume_price_total", "vol_surge_score", "amount_stability_score", "pullback_volume_score",
+        "technical_total", "ma_trend_score", "macd_score", "platform_score",
+        "chip_total", "shrink_score", "amp_narrow_score", "position_score",
     ]
     display_cols = [c for c in summary_cols if c in top_df.columns]
     logger.info(f"\n前{top_n}只候选股票:")

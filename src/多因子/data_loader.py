@@ -1,0 +1,304 @@
+from __future__ import annotations
+
+from typing import Any
+
+import pandas as pd
+
+from md.获取enddate.get_date_range import get_date_range
+from md.合并下载数据.合并下载数据 import batchDownloadDayData, getDayData, getDayDataCache
+from src.基础筛选.filterStocks import get_universe_with_basics
+
+from src.多因子 import config
+
+try:
+    # 这里仅用于补充证券简称，并在基础股票池层面过滤 ST。
+    # 如果 xtquant 不可用，不让整个框架崩掉，而是退化为“不做 ST 名称过滤”。
+    from xtquant import xtdata
+except Exception:  # pragma: no cover - 依赖运行环境
+    xtdata = None
+
+
+def get_strategy_date_range() -> tuple[str, str, str]:
+    """获取策略日期范围。
+
+    这里严格遵守 `.cursorrules`：
+    - 开始日期 / 结束日期不手写；
+    - 必须统一通过 `get_date_range()` 获取。
+
+    Returns:
+        start_date: 起始日期，格式为 `YYYYMMDD`
+        end_date: 结束日期，格式为 `YYYYMMDD`
+        reason: 结束日期为何取该值的说明文字
+    """
+    start_date, end_date, reason = get_date_range()
+    return start_date, end_date, reason
+
+
+def _get_stock_name(code: str) -> str | None:
+    """读取单只股票名称。
+
+    这里尝试从 xtdata 的合约详情中读取证券简称。
+    不同环境下字段名可能不同，所以做一个兼容性轮询。
+    只要能拿到名称，就用于后续 ST 识别；拿不到则返回 `None`。
+    """
+    if xtdata is None:
+        return None
+
+    try:
+        info = xtdata.get_instrument_detail(code)
+    except Exception:
+        return None
+
+    if not isinstance(info, dict):
+        return None
+
+    for field in [
+        "InstrumentName",
+        "instrument_name",
+        "StockName",
+        "stock_name",
+        "Name",
+        "name",
+    ]:
+        value = info.get(field)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
+def _filter_st_stocks(universe_df: pd.DataFrame) -> pd.DataFrame:
+    """在基础股票池上追加 ST 过滤。
+
+    过滤规则尽量简单直接：
+    - 证券简称以 `ST` 开头；
+    - 证券简称以 `*ST` 开头；
+    - 证券简称中包含 `ST` 且常见形式可识别。
+
+    说明：
+    1. 你本轮要求“只过滤 ST，其他不过滤”，因此仅在这里做名称过滤。
+    2. 如果名称读取失败，则默认保留该股票，避免因为数据源偶发问题误删样本。
+    """
+    if universe_df.empty:
+        return universe_df
+
+    result_df = universe_df.copy()
+    result_df["name"] = result_df["code"].apply(_get_stock_name)
+
+    def is_st_name(name: object) -> bool:
+        if not isinstance(name, str):
+            return False
+        clean_name = name.strip().upper().replace(" ", "")
+        return clean_name.startswith("ST") or clean_name.startswith("*ST")
+
+    st_mask = result_df["name"].apply(is_st_name)
+    filtered_df = result_df.loc[~st_mask].reset_index(drop=True)
+    return filtered_df
+
+
+def load_base_universe(max_price: float, max_mcap: float) -> pd.DataFrame:
+    """通过统一入口获取基础股票池，并按配置决定是否过滤 ST。
+
+    流程说明：
+    1. 先调用 `.cursorrules` 指定的统一股票池入口；
+    2. 去重，避免同一代码重复；
+    3. 如果开启 ST 过滤，则补充名称并剔除 ST / *ST。
+    """
+    universe_df = get_universe_with_basics(max_price=max_price, max_mcap=max_mcap).copy()
+    if universe_df.empty:
+        return universe_df
+
+    universe_df = universe_df.drop_duplicates(subset=["code"]).reset_index(drop=True)
+
+    if config.ENABLE_ST_FILTER:
+        universe_df = _filter_st_stocks(universe_df)
+
+    return universe_df
+
+
+def load_daily_bars(
+    stock_codes: list[str],
+    start_date: str,
+    end_date: str,
+    need_download: int = 0,
+    dividend_type: str = "front",
+) -> dict[str, pd.DataFrame]:
+    """批量加载股票日线行情。
+
+    设计思路：
+    - 股票较多时，使用批量接口提高效率；
+    - 股票较少时，走缓存接口，避免不必要的重复下载；
+    - 返回值统一整理为 `{code: DataFrame}` 的字典结构。
+    """
+    if not stock_codes:
+        return {}
+
+    if len(stock_codes) >= 100:
+        raw_dict = batchDownloadDayData(
+            stock_codes=stock_codes,
+            start_date=start_date,
+            end_date=end_date,
+            dividend_type=dividend_type,
+            need_download=need_download,
+        )
+    else:
+        raw_dict = {
+            code: getDayDataCache(
+                stock_code=code,
+                start_date=start_date,
+                end_date=end_date,
+                is_download=need_download,
+                dividend_type=dividend_type,
+            )
+            for code in stock_codes
+        }
+
+    bar_dict: dict[str, pd.DataFrame] = {}
+    for code, df in raw_dict.items():
+        # 这里仅保留有效的 DataFrame，下载失败或空数据直接跳过。
+        if not isinstance(df, pd.DataFrame) or df.empty:
+            continue
+
+        normalized = df.copy()
+
+        # 日期统一转成字符串，方便后面拼接成宽表矩阵。
+        normalized["date"] = normalized["date"].astype(str)
+
+        # 同一股票同一天若出现重复记录，仅保留一条。
+        normalized = normalized.drop_duplicates(subset=["date"]).sort_values("date")
+        bar_dict[code] = normalized
+
+    return bar_dict
+
+
+def load_benchmark_close(
+    benchmark_code: str,
+    start_date: str,
+    end_date: str,
+    need_download: int = 0,
+    dividend_type: str = "front",
+) -> pd.Series:
+    """读取基准指数收盘价序列。
+
+    当前按你的要求，基准固定为中证 2000。
+    这里直接复用统一日线获取入口，保持与股票行情同一套数据链路。
+
+    返回：
+        以日期字符串为索引的收盘价序列；若读取失败则返回空序列。
+    """
+    try:
+        benchmark_df = getDayData(
+            stock_code=benchmark_code,
+            start_date=start_date,
+            end_date=end_date,
+            is_download=need_download,
+            dividend_type=dividend_type,
+        )
+    except Exception:
+        return pd.Series(dtype=float, name=config.BENCHMARK_NAME)
+
+    if not isinstance(benchmark_df, pd.DataFrame) or benchmark_df.empty or "close" not in benchmark_df.columns:
+        return pd.Series(dtype=float, name=config.BENCHMARK_NAME)
+
+    benchmark_close = benchmark_df[["date", "close"]].copy()
+    benchmark_close["date"] = benchmark_close["date"].astype(str)
+    benchmark_close["close"] = pd.to_numeric(benchmark_close["close"], errors="coerce")
+    benchmark_close = benchmark_close.drop_duplicates(subset=["date"]).set_index("date")["close"]
+    benchmark_close.name = config.BENCHMARK_NAME
+    return benchmark_close
+
+
+def _pivot_field(bar_dict: dict[str, pd.DataFrame], field: str) -> pd.DataFrame:
+    """把逐股票长表，转成“日期 × 股票”的宽表矩阵。
+
+    例如：
+    - 输入是一堆单票 DataFrame；
+    - 输出是一个 `close_df` 或 `amount_df` 这样的宽表。
+    """
+    frames = []
+    for code, df in bar_dict.items():
+        if field not in df.columns:
+            continue
+
+        series = df[["date", field]].copy()
+        series[field] = pd.to_numeric(series[field], errors="coerce")
+        series = series.rename(columns={field: code}).set_index("date")
+        frames.append(series)
+
+    if not frames:
+        return pd.DataFrame()
+
+    matrix = pd.concat(frames, axis=1).sort_index()
+    matrix.index = pd.Index(matrix.index.astype(str), name="date")
+    return matrix
+
+
+def align_price_fields(bar_dict: dict[str, pd.DataFrame]) -> dict[str, pd.DataFrame]:
+    """将逐股票行情对齐成统一矩阵。
+
+    返回字段包括：
+    - open
+    - high
+    - low
+    - close
+    - volume
+    - amount
+    """
+    fields = ["open", "high", "low", "close", "volume", "amount"]
+    return {field: _pivot_field(bar_dict, field) for field in fields}
+
+
+def build_data_bundle(
+    max_price: float = config.MAX_PRICE,
+    max_mcap: float = config.MAX_MCAP,
+    need_download: int = config.NEED_DOWNLOAD,
+    dividend_type: str = config.DIVIDEND_TYPE,
+    start_date: str | None = None,
+    end_date: str | None = None,
+) -> dict[str, Any]:
+    """构建策略运行所需的数据包。
+
+    这是主流程的数据总入口，负责把下面几件事串起来：
+    1. 拿日期范围；
+    2. 拿基础股票池；
+    3. 在股票池层面过滤 ST；
+    4. 拉取所有样本的日线行情；
+    5. 读取中证 2000 基准行情；
+    6. 把行情整理成多张宽表，供因子和回测模块直接使用。
+
+    说明：
+    - 默认仍然走统一日期函数；
+    - 如果外部显式传入 `start_date` / `end_date`，则优先使用传入值，
+      方便像可视化脚本这类“运行前弹窗指定日期”的场景。
+    """
+    if start_date is None or end_date is None:
+        start_date, end_date, date_reason = get_strategy_date_range()
+    else:
+        date_reason = "手动指定日期范围"
+    universe_df = load_base_universe(max_price=max_price, max_mcap=max_mcap)
+    stock_codes = universe_df["code"].tolist() if not universe_df.empty else []
+
+    bar_dict = load_daily_bars(
+        stock_codes=stock_codes,
+        start_date=start_date,
+        end_date=end_date,
+        need_download=need_download,
+        dividend_type=dividend_type,
+    )
+    aligned = align_price_fields(bar_dict)
+    benchmark_close = load_benchmark_close(
+        benchmark_code=config.BENCHMARK_CODE,
+        start_date=start_date,
+        end_date=end_date,
+        need_download=need_download,
+        dividend_type=dividend_type,
+    )
+
+    return {
+        "universe": universe_df,
+        "bars": bar_dict,
+        "benchmark_close": benchmark_close,
+        "start_date": start_date,
+        "end_date": end_date,
+        "date_reason": date_reason,
+        **aligned,
+    }

@@ -224,7 +224,7 @@ def _calc_wind_date_range() -> tuple:
 
 
 # ── Wind 资金流向缓存目录 ──
-_WIND_CACHE_DIR = Path(__file__).resolve().parents[1].parent / "data" / "cache" / "wind_mfd"
+_WIND_CACHE_DIR = Path(__file__).resolve().parents[1].parent / "data" / "cache" / f"wind_mfd_{WIND_MFD_LOOKBACK_DAYS}d"
 
 
 def _wind_cache_path(code: str, end_date: str) -> Path:
@@ -236,13 +236,15 @@ def _wind_cache_path(code: str, end_date: str) -> Path:
 def _load_wind_cache(codes: List[str], end_date: str) -> Dict[str, pd.DataFrame]:
     """从磁盘加载已缓存的 Wind 资金流向数据。"""
     cached = {}
+    min_rows = WIND_MFD_LOOKBACK_DAYS
     for code in codes:
         p = _wind_cache_path(code, end_date)
         if p.exists():
             try:
                 with open(p, "rb") as f:
                     df = pickle.load(f)
-                if isinstance(df, pd.DataFrame) and not df.empty:
+                if (isinstance(df, pd.DataFrame) and not df.empty and
+                        "mfd_inflow_m" in df.columns and len(df.dropna(subset=["mfd_inflow_m"])) >= min_rows):
                     cached[code] = df
             except Exception:
                 pass

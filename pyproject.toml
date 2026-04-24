@@ -11,6 +11,7 @@ dependencies = [
     "pandas",
     "numpy",
     "WindPy",
+    "vectorbt",
 ]
 
 [tool.setuptools.packages.find]

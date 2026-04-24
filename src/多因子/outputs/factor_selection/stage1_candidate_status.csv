@@ -1,0 +1,3 @@
+﻿factor,IC均值通过,ICIR通过,RankIC均值通过,RankICIR通过,RR均值通过,RR胜率通过,初筛是否通过,备注
+momentum_20,True,False,True,False,True,False,True,当前阈值导致无因子通过，已回退为保留全部候选因子
+risk_adjusted_momentum_20,True,False,True,False,True,False,True,当前阈值导致无因子通过，已回退为保留全部候选因子
