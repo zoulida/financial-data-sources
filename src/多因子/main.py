@@ -683,28 +683,57 @@ class StrategyRunDialog:
         return self.result
 
 
-def _passes_threshold(value: float, threshold: float | None) -> bool:
+def _passes_threshold(value: float, threshold: float | None, *, use_abs: bool = False) -> bool:
     """判断单个指标是否通过阈值。"""
     if threshold is None:
         return True
     if pd.isna(value):
         return False
-    return bool(value >= threshold)
+    metric_value = abs(float(value)) if use_abs else float(value)
+    return bool(metric_value >= threshold)
+
+
+def _infer_factor_direction(row: pd.Series) -> int:
+    """根据候选因子指标推断后续组合使用方向。"""
+    rank_ic_mean = row.get("RankIC均值")
+    if pd.notna(rank_ic_mean) and float(rank_ic_mean) != 0.0:
+        return 1 if float(rank_ic_mean) > 0 else -1
+
+    ic_mean = row.get("IC均值")
+    if pd.notna(ic_mean) and float(ic_mean) != 0.0:
+        return 1 if float(ic_mean) > 0 else -1
+
+    return 1
+
+
+def _apply_factor_direction(score_df: pd.DataFrame, direction: int) -> pd.DataFrame:
+    """按推断方向统一因子分数，保证分数越高越偏多。"""
+    if direction >= 0:
+        return score_df
+    return score_df * -1
 
 
 def _build_candidate_status(candidate_metrics_df: pd.DataFrame) -> pd.DataFrame:
     """根据候选因子指标总表，生成“阶段一：初筛状态表”。"""
     rows: list[dict[str, object]] = []
     for _, row in candidate_metrics_df.iterrows():
+        direction = _infer_factor_direction(row)
         metric_checks = {
-            "IC均值通过": _passes_threshold(row["IC均值"], config.MIN_IC_MEAN),
-            "ICIR通过": _passes_threshold(row["ICIR"], config.MIN_ICIR),
-            "RankIC均值通过": _passes_threshold(row["RankIC均值"], config.MIN_RANK_IC_MEAN),
-            "RankICIR通过": _passes_threshold(row["RankICIR"], config.MIN_RANK_ICIR),
+            "IC均值通过": _passes_threshold(row["IC均值"], config.MIN_IC_MEAN, use_abs=True),
+            "ICIR通过": _passes_threshold(row["ICIR"], config.MIN_ICIR, use_abs=True),
+            "RankIC均值通过": _passes_threshold(row["RankIC均值"], config.MIN_RANK_IC_MEAN, use_abs=True),
+            "RankICIR通过": _passes_threshold(row["RankICIR"], config.MIN_RANK_ICIR, use_abs=True),
             "RR均值通过": _passes_threshold(row["RR均值"], config.MIN_RR_MEAN),
             "RR胜率通过": _passes_threshold(row["RR胜率"], config.MIN_RR_WIN_RATE),
         }
-        rows.append({"factor": row["factor"], **metric_checks, "初筛是否通过": all(metric_checks.values())})
+        rows.append(
+            {
+                "factor": row["factor"],
+                "方向": direction,
+                **metric_checks,
+                "初筛是否通过": all(metric_checks.values()),
+            }
+        )
     return pd.DataFrame(rows)
 
 
@@ -715,7 +744,7 @@ def _calc_factor_priority(candidate_metrics_df: pd.DataFrame, factor_name: str) 
         return float("-inf")
 
     values = row.iloc[0]
-    metrics = [values["ICIR"], values["RankICIR"], values["RR胜率"], values["RR均值"], values["IC均值"]]
+    metrics = [abs(values["ICIR"]), abs(values["RankICIR"]), values["RR胜率"], values["RR均值"], abs(values["IC均值"])]
     score = 0.0
     for metric in metrics:
         if pd.notna(metric):
@@ -1064,8 +1093,16 @@ def run_strategy(
         candidate_status_df["备注"] = "当前阈值导致无因子通过，已回退为保留全部候选因子"
         screened_factors = candidate_status_df["factor"].tolist()
 
+    factor_directions = {
+        row["factor"]: int(row["方向"])
+        for _, row in candidate_status_df.iterrows()
+    }
+    adjusted_factor_scores = {
+        factor_name: _apply_factor_direction(candidate_factor_scores[factor_name], factor_directions.get(factor_name, 1))
+        for factor_name in screened_factors
+    }
     screened_metrics_df = candidate_metrics_df[candidate_metrics_df["factor"].isin(screened_factors)].reset_index(drop=True)
-    screened_factor_scores = {name: candidate_factor_scores[name] for name in screened_factors}
+    screened_metrics_df["方向"] = screened_metrics_df["factor"].map(factor_directions).fillna(1).astype(int)
 
     _print_stage_table("阶段2结果：初筛状态表", candidate_status_df)
     _print_stage_table("阶段2结果：进入相关性分析的因子", screened_metrics_df)
@@ -1098,7 +1135,7 @@ def run_strategy(
     _print_separator("=", 90)
     report_progress("阶段3：相关性去冗余", "正在分析因子相关性并保留优先级更高的因子...")
     final_factor_names, corr_matrix_df, corr_pairs_df, final_selection_df = _deduplicate_by_correlation(
-        screened_factor_scores=screened_factor_scores,
+        screened_factor_scores=adjusted_factor_scores,
         screened_metrics_df=screened_metrics_df,
     )
     if not final_factor_names:
@@ -1137,7 +1174,7 @@ def run_strategy(
     _print_separator("=", 90)
     report_progress("阶段4：组合构建与回测", "正在合成最终分数并运行回测...")
     final_weights = {factor_name: 1.0 / len(final_factor_names) for factor_name in final_factor_names}
-    selected_factor_scores = {name: candidate_factor_scores[name] for name in final_factor_names}
+    selected_factor_scores = {name: adjusted_factor_scores[name] for name in final_factor_names}
     score_df = combine_factor_scores(selected_factor_scores, final_weights)
     selection_df = select_top_n(score_df, n=config.HOLD_NUM)
     target_weights = build_target_weights(selection_df, rebalance_mask)
