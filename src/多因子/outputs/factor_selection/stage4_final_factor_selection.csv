@@ -1,3 +1,12 @@
 ﻿factor,是否入选最终组合,组合权重
-momentum_20,False,0.0
-risk_adjusted_momentum_20,True,1.0
+alpha101.alpha003,True,0.1
+alpha101.alpha004,True,0.1
+alpha101.alpha006,True,0.1
+alpha101.alpha008,True,0.1
+alpha101.alpha012,True,0.1
+alpha101.alpha013,True,0.1
+alpha101.alpha014,False,0.0
+alpha101.alpha015,True,0.1
+alpha101.alpha016,True,0.1
+alpha101.alpha018,True,0.1
+alpha101.alpha019,True,0.1

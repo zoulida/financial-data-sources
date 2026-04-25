@@ -31,6 +31,7 @@ from src.多因子.factor_evaluation import (
 )
 from src.多因子.factors.momentum import compute_momentum_factor
 from src.多因子.factors.risk_adjusted_momentum import compute_risk_adjusted_momentum
+from src.多因子.factors.alpha101._base import returns as alpha101_returns, vwap as alpha101_vwap
 from src.多因子.report import save_backtest_results, save_selection_results, save_stage_results
 from src.多因子.scoring import combine_factor_scores, mask_factor, rank_score, select_top_n
 from src.多因子.universe import build_tradable_mask
@@ -161,6 +162,56 @@ def _discover_alpha158_factors() -> dict[str, dict[str, object]]:
     return discovered
 
 
+ALPHA101_FACTOR_SPECS = {
+    "alpha001": {"args": ["close"], "label": "Alpha101 #001"},
+    "alpha002": {"args": ["open", "close", "volume"], "label": "Alpha101 #002"},
+    "alpha003": {"args": ["open", "volume"], "label": "Alpha101 #003"},
+    "alpha004": {"args": ["low"], "label": "Alpha101 #004"},
+    "alpha005": {"args": ["open", "close", "vwap"], "label": "Alpha101 #005"},
+    "alpha006": {"args": ["open", "volume"], "label": "Alpha101 #006"},
+    "alpha007": {"args": ["close", "volume"], "label": "Alpha101 #007"},
+    "alpha008": {"args": ["open", "returns"], "label": "Alpha101 #008"},
+    "alpha009": {"args": ["close"], "label": "Alpha101 #009"},
+    "alpha010": {"args": ["close"], "label": "Alpha101 #010"},
+    "alpha011": {"args": ["close", "vwap", "volume"], "label": "Alpha101 #011"},
+    "alpha012": {"args": ["volume", "close"], "label": "Alpha101 #012"},
+    "alpha013": {"args": ["close", "volume"], "label": "Alpha101 #013"},
+    "alpha014": {"args": ["open", "volume", "returns"], "label": "Alpha101 #014"},
+    "alpha015": {"args": ["high", "volume"], "label": "Alpha101 #015"},
+    "alpha016": {"args": ["high", "volume"], "label": "Alpha101 #016"},
+    "alpha017": {"args": ["close", "vwap"], "label": "Alpha101 #017"},
+    "alpha018": {"args": ["open", "close"], "label": "Alpha101 #018"},
+    "alpha019": {"args": ["close"], "label": "Alpha101 #019"},
+    "alpha020": {"args": ["open", "high", "low", "close"], "label": "Alpha101 #020"},
+}
+
+
+def _discover_alpha101_factors() -> dict[str, dict[str, object]]:
+    """扫描 alpha101 子目录，构建可注册因子清单。"""
+    alpha_dir = Path(__file__).resolve().parent / "factors" / "alpha101"
+    if not alpha_dir.exists():
+        return {}
+
+    discovered: dict[str, dict[str, object]] = {}
+    for file_path in sorted(alpha_dir.glob("alpha*.py")):
+        if file_path.stem.startswith("_"):
+            continue
+        factor_name = file_path.stem
+        spec = ALPHA101_FACTOR_SPECS.get(factor_name)
+        if spec is None:
+            continue
+        factor_key = f"alpha101.{factor_name}"
+        discovered[factor_key] = {
+            "module": f"src.多因子.factors.alpha101.{factor_name}",
+            "function": f"compute_{factor_name}",
+            "args": list(spec["args"]),
+            "label": str(spec["label"]),
+            "ascending": False,
+            "group": "alpha101",
+        }
+    return discovered
+
+
 FACTOR_REGISTRY: dict[str, dict[str, object]] = {
     "momentum_20": {
         "kind": "builtin",
@@ -176,6 +227,7 @@ FACTOR_REGISTRY: dict[str, dict[str, object]] = {
     },
 }
 FACTOR_REGISTRY.update(_discover_alpha158_factors())
+FACTOR_REGISTRY.update(_discover_alpha101_factors())
 
 FACTOR_DIRECTIONS = {name: bool(spec["ascending"]) for name, spec in FACTOR_REGISTRY.items()}
 FACTOR_LABELS = {name: str(spec["label"]) for name, spec in FACTOR_REGISTRY.items()}
@@ -208,6 +260,19 @@ def _compute_registered_factor(factor_name: str, data_bundle: dict[str, object])
     compute_func = getattr(module, function_name)
     args = []
     for field_name in spec.get("args", []):
+        if field_name == "vwap":
+            amount_df = data_bundle.get("amount")
+            volume_df = data_bundle.get("volume")
+            if not isinstance(amount_df, pd.DataFrame) or not isinstance(volume_df, pd.DataFrame):
+                raise ValueError(f"计算因子 {factor_name} 时缺少字段: vwap")
+            args.append(alpha101_vwap(amount_df, volume_df))
+            continue
+        if field_name == "returns":
+            close_df = data_bundle.get("close")
+            if not isinstance(close_df, pd.DataFrame):
+                raise ValueError(f"计算因子 {factor_name} 时缺少字段: returns")
+            args.append(alpha101_returns(close_df))
+            continue
         field_df = data_bundle.get(str(field_name))
         if not isinstance(field_df, pd.DataFrame):
             raise ValueError(f"计算因子 {factor_name} 时缺少字段: {field_name}")
@@ -225,16 +290,18 @@ def _configure_scrollable_frame(canvas: tk.Canvas, scroll_frame: ttk.Frame) -> N
     scroll_frame.bind("<Configure>", _on_configure)
 
 
-class Alpha158SelectionDialog:
-    """Alpha158 因子单独选择窗口。"""
+class FactorGroupSelectionDialog:
+    """分组因子单独选择窗口。"""
 
-    def __init__(self, selected_factors: list[str] | None = None) -> None:
+    def __init__(self, group: str, title: str, selected_factors: list[str] | None = None) -> None:
         self.result: list[str] | None = None
         self.selected_factors = set(selected_factors or [])
-        self.alpha_factor_names = _iter_factor_names("alpha158")
+        self.group = group
+        self.group_title = title
+        self.group_factor_names = _iter_factor_names(group)
 
         self.root = tk.Toplevel()
-        self.root.title("选择 Alpha158 因子")
+        self.root.title(f"选择 {title} 因子")
         self.root.resizable(False, False)
         self._center_window(620, 680)
         self.root.transient()
@@ -243,10 +310,10 @@ class Alpha158SelectionDialog:
         container = ttk.Frame(self.root, padding=16)
         container.pack(fill="both", expand=True)
 
-        ttk.Label(container, text="请选择要启用的 Alpha158 因子", font=("Microsoft YaHei", 13, "bold")).pack(anchor="w")
+        ttk.Label(container, text=f"请选择要启用的 {title} 因子", font=("Microsoft YaHei", 13, "bold")).pack(anchor="w")
         ttk.Label(
             container,
-            text="这些因子位于 factors/alpha158 子目录，勾选后会参与回测。",
+            text=f"这些因子位于 factors/{group} 子目录，勾选后会参与回测。",
             foreground="#666666",
         ).pack(anchor="w", pady=(4, 10))
 
@@ -266,7 +333,7 @@ class Alpha158SelectionDialog:
         scrollbar.pack(side="right", fill="y")
 
         self.factor_vars: dict[str, tk.BooleanVar] = {}
-        for row_index, factor_name in enumerate(self.alpha_factor_names):
+        for row_index, factor_name in enumerate(self.group_factor_names):
             var = tk.BooleanVar(value=factor_name in self.selected_factors)
             self.factor_vars[factor_name] = var
             ttk.Checkbutton(
@@ -306,7 +373,7 @@ class Alpha158SelectionDialog:
             var.set(not var.get())
 
     def _cancel(self) -> None:
-        self.result = None
+        self.result = [name for name, var in self.factor_vars.items() if var.get()]
         self.root.destroy()
 
     def _confirm(self) -> None:
@@ -316,6 +383,20 @@ class Alpha158SelectionDialog:
     def show(self) -> list[str] | None:
         self.root.wait_window()
         return self.result
+
+
+class Alpha158SelectionDialog(FactorGroupSelectionDialog):
+    """Alpha158 因子单独选择窗口。"""
+
+    def __init__(self, selected_factors: list[str] | None = None) -> None:
+        super().__init__(group="alpha158", title="Alpha158", selected_factors=selected_factors)
+
+
+class Alpha101SelectionDialog(FactorGroupSelectionDialog):
+    """Alpha101 因子单独选择窗口。"""
+
+    def __init__(self, selected_factors: list[str] | None = None) -> None:
+        super().__init__(group="alpha101", title="Alpha101", selected_factors=selected_factors)
 
 
 def _iter_factor_names(group: str | None = None) -> list[str]:
@@ -340,7 +421,8 @@ class StrategyRunDialog:
     def __init__(self) -> None:
         self.result: dict[str, object] | None = None
         default_start, default_end, _ = get_strategy_date_range()
-        self.selected_alpha158_factors = _iter_factor_names("alpha158")
+        self.selected_alpha158_factors: list[str] = []
+        self.selected_alpha101_factors: list[str] = []
 
         self.root = tk.Tk()
         self.root.title("多因子运行参数")
@@ -391,14 +473,47 @@ class StrategyRunDialog:
         ttk.Label(container, text="Alpha158 因子").grid(row=4, column=0, sticky="nw", pady=(0, 12))
         alpha_frame = ttk.Frame(container)
         alpha_frame.grid(row=4, column=1, sticky="w", pady=(0, 12))
-        ttk.Button(alpha_frame, text="选择 Alpha158 因子...", command=self._open_alpha158_dialog).pack(side="left")
+        self.alpha158_var = tk.IntVar(value=0)
+        self.alpha158_check = tk.Checkbutton(
+            alpha_frame,
+            text="启用 Alpha158",
+            variable=self.alpha158_var,
+            onvalue=1,
+            offvalue=0,
+            tristatevalue=-1,
+            indicatoron=True,
+            selectcolor="#bfbfbf",
+            command=self._toggle_alpha158_from_main,
+        )
+        self.alpha158_check.pack(side="left")
+        ttk.Button(alpha_frame, text="选择 Alpha158 因子...", command=self._open_alpha158_dialog).pack(side="left", padx=(10, 0))
         self.alpha158_summary_var = tk.StringVar(value=self._build_alpha158_summary())
         ttk.Label(alpha_frame, textvariable=self.alpha158_summary_var, foreground="#666666").pack(side="left", padx=(10, 0))
 
-        ttk.Label(container, text="运行到第几阶段").grid(row=5, column=0, sticky="nw")
+        ttk.Label(container, text="Alpha101 因子").grid(row=5, column=0, sticky="nw", pady=(0, 12))
+        alpha101_frame = ttk.Frame(container)
+        alpha101_frame.grid(row=5, column=1, sticky="w", pady=(0, 12))
+        self.alpha101_var = tk.IntVar(value=0)
+        self.alpha101_check = tk.Checkbutton(
+            alpha101_frame,
+            text="启用 Alpha101",
+            variable=self.alpha101_var,
+            onvalue=1,
+            offvalue=0,
+            tristatevalue=-1,
+            indicatoron=True,
+            selectcolor="#bfbfbf",
+            command=self._toggle_alpha101_from_main,
+        )
+        self.alpha101_check.pack(side="left")
+        ttk.Button(alpha101_frame, text="选择 Alpha101 因子...", command=self._open_alpha101_dialog).pack(side="left", padx=(10, 0))
+        self.alpha101_summary_var = tk.StringVar(value=self._build_alpha101_summary())
+        ttk.Label(alpha101_frame, textvariable=self.alpha101_summary_var, foreground="#666666").pack(side="left", padx=(10, 0))
+
+        ttk.Label(container, text="运行到第几阶段").grid(row=6, column=0, sticky="nw")
         self.max_stage_var = tk.IntVar(value=4)
         stage_frame = ttk.Frame(container)
-        stage_frame.grid(row=5, column=1, sticky="w")
+        stage_frame.grid(row=6, column=1, sticky="w")
         for stage, label in [
             (1, "阶段1：单因子评估"),
             (2, "阶段2：指标初筛"),
@@ -408,20 +523,22 @@ class StrategyRunDialog:
             ttk.Radiobutton(stage_frame, text=label, variable=self.max_stage_var, value=stage).pack(anchor="w", pady=1)
 
         ttk.Label(container, text="默认日期沿用当前策略原始范围，可直接修改。", foreground="#666666").grid(
-            row=6, column=0, columnspan=2, sticky="w", pady=(12, 4)
+            row=7, column=0, columnspan=2, sticky="w", pady=(12, 4)
         )
 
         self.message_var = tk.StringVar(value="")
         ttk.Label(container, textvariable=self.message_var, foreground="#cc3333").grid(
-            row=7, column=0, columnspan=2, sticky="w", pady=(4, 10)
+            row=8, column=0, columnspan=2, sticky="w", pady=(4, 10)
         )
 
         button_frame = ttk.Frame(container)
-        button_frame.grid(row=8, column=0, columnspan=2, sticky="e")
+        button_frame.grid(row=9, column=0, columnspan=2, sticky="e")
         ttk.Button(button_frame, text="取消", command=self._cancel).pack(side="right", padx=(8, 0))
         ttk.Button(button_frame, text="开始运行", command=self._confirm).pack(side="right")
 
         container.columnconfigure(1, weight=1)
+        self._sync_alpha158_main_state()
+        self._sync_alpha101_main_state()
         self.root.protocol("WM_DELETE_WINDOW", self._cancel)
 
     def _center_window(self, width: int, height: int) -> None:
@@ -444,9 +561,74 @@ class StrategyRunDialog:
         for var in self.factor_vars.values():
             var.set(not var.get())
 
+    def _set_alpha158_state(self, state: str) -> None:
+        """设置 Alpha158 主复选框状态。"""
+        if state == "all":
+            self.alpha158_var.set(1)
+        elif state == "partial":
+            self.alpha158_var.set(-1)
+        else:
+            self.alpha158_var.set(0)
+        self.alpha158_check.update_idletasks()
+
+    def _sync_alpha158_main_state(self) -> None:
+        """根据已选数量同步主界面 Alpha158 复选框状态。"""
+        total_count = len(_iter_factor_names("alpha158"))
+        selected_count = len(self.selected_alpha158_factors)
+        if selected_count <= 0:
+            self._set_alpha158_state("none")
+        elif selected_count >= total_count:
+            self._set_alpha158_state("all")
+        else:
+            self._set_alpha158_state("partial")
+        self.alpha158_summary_var.set(self._build_alpha158_summary())
+
+    def _toggle_alpha158_from_main(self) -> None:
+        """主界面切换 Alpha158 全选/全不选。"""
+        if self.alpha158_var.get() == 1:
+            self.selected_alpha158_factors = _iter_factor_names("alpha158")
+        else:
+            self.selected_alpha158_factors = []
+        self._sync_alpha158_main_state()
+
     def _build_alpha158_summary(self) -> str:
         total_count = len(_iter_factor_names("alpha158"))
         selected_count = len(self.selected_alpha158_factors)
+        return f"已选择 {selected_count} / {total_count} 个因子"
+
+    def _set_alpha101_state(self, state: str) -> None:
+        """设置 Alpha101 主复选框状态。"""
+        if state == "all":
+            self.alpha101_var.set(1)
+        elif state == "partial":
+            self.alpha101_var.set(-1)
+        else:
+            self.alpha101_var.set(0)
+        self.alpha101_check.update_idletasks()
+
+    def _sync_alpha101_main_state(self) -> None:
+        """根据已选数量同步主界面 Alpha101 复选框状态。"""
+        total_count = len(_iter_factor_names("alpha101"))
+        selected_count = len(self.selected_alpha101_factors)
+        if selected_count <= 0:
+            self._set_alpha101_state("none")
+        elif selected_count >= total_count:
+            self._set_alpha101_state("all")
+        else:
+            self._set_alpha101_state("partial")
+        self.alpha101_summary_var.set(self._build_alpha101_summary())
+
+    def _toggle_alpha101_from_main(self) -> None:
+        """主界面切换 Alpha101 全选/全不选。"""
+        if self.alpha101_var.get() == 1:
+            self.selected_alpha101_factors = _iter_factor_names("alpha101")
+        else:
+            self.selected_alpha101_factors = []
+        self._sync_alpha101_main_state()
+
+    def _build_alpha101_summary(self) -> str:
+        total_count = len(_iter_factor_names("alpha101"))
+        selected_count = len(self.selected_alpha101_factors)
         return f"已选择 {selected_count} / {total_count} 个因子"
 
     def _open_alpha158_dialog(self) -> None:
@@ -455,7 +637,15 @@ class StrategyRunDialog:
         if selected is None:
             return
         self.selected_alpha158_factors = selected
-        self.alpha158_summary_var.set(self._build_alpha158_summary())
+        self._sync_alpha158_main_state()
+
+    def _open_alpha101_dialog(self) -> None:
+        dialog = Alpha101SelectionDialog(self.selected_alpha101_factors)
+        selected = dialog.show()
+        if selected is None:
+            return
+        self.selected_alpha101_factors = selected
+        self._sync_alpha101_main_state()
 
     def _cancel(self) -> None:
         self.result = None
@@ -475,7 +665,7 @@ class StrategyRunDialog:
             return
 
         selected_base_factors = [factor_name for factor_name, var in self.factor_vars.items() if var.get()]
-        selected_factors = selected_base_factors + self.selected_alpha158_factors
+        selected_factors = selected_base_factors + self.selected_alpha158_factors + self.selected_alpha101_factors
         if not selected_factors:
             self.message_var.set("请至少选择一个因子")
             return
@@ -834,6 +1024,11 @@ def run_strategy(
         "selected_score_matrix": pd.DataFrame(),
     }
 
+    output_dir = Path(__file__).resolve().parent / config.OUTPUT_DIR
+    save_stage_results(stage_results, str(output_dir))
+    stage1_metrics_path = output_dir / "factor_selection" / "stage1_candidate_metrics.csv"
+    print(f"[阶段1] 已保存候选因子指标总表：{stage1_metrics_path}")
+
     if max_stage == 1:
         summary = {
             "start_date": data_bundle["start_date"],
@@ -843,7 +1038,7 @@ def run_strategy(
             "benchmark_code": config.BENCHMARK_CODE,
             "stock_count": len(universe_df),
             "bar_count": len(data_bundle.get("bars", {})),
-            "output_dir": None,
+            "output_dir": str(output_dir),
             "portfolio": None,
             "results": None,
             "factor_analysis": factor_analysis,
