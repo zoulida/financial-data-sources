@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+import inspect
 import sys
 import threading
 import time
@@ -8,7 +9,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 import tkinter as tk
-from tkinter import ttk
+from tkinter import messagebox, ttk
 
 import pandas as pd
 
@@ -162,6 +163,26 @@ def _discover_alpha158_factors() -> dict[str, dict[str, object]]:
     return discovered
 
 
+def _infer_factor_args(module_name: str, function_name: str) -> list[str] | None:
+    """从 compute 函数签名推断注册表所需字段名。"""
+    try:
+        module = importlib.import_module(module_name)
+        compute_func = getattr(module, function_name)
+        signature = inspect.signature(compute_func)
+    except (ImportError, AttributeError, ValueError, TypeError):
+        return None
+
+    args: list[str] = []
+    for param_name, parameter in signature.parameters.items():
+        if parameter.kind not in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD):
+            continue
+        if not param_name.endswith("_df"):
+            return None
+        field_name = param_name.removesuffix("_df")
+        args.append(field_name)
+    return args
+
+
 ALPHA101_FACTOR_SPECS = {
     "alpha001": {"args": ["close"], "label": "Alpha101 #001"},
     "alpha002": {"args": ["open", "close", "volume"], "label": "Alpha101 #002"},
@@ -198,12 +219,17 @@ def _discover_alpha101_factors() -> dict[str, dict[str, object]]:
             continue
         factor_name = file_path.stem
         spec = ALPHA101_FACTOR_SPECS.get(factor_name)
+        module_name = f"src.多因子.factors.alpha101.{factor_name}"
+        function_name = f"compute_{factor_name}"
         if spec is None:
-            continue
+            inferred_args = _infer_factor_args(module_name, function_name)
+            if inferred_args is None:
+                continue
+            spec = {"args": inferred_args, "label": f"Alpha101 #{factor_name.removeprefix('alpha')}"}
         factor_key = f"alpha101.{factor_name}"
         discovered[factor_key] = {
-            "module": f"src.多因子.factors.alpha101.{factor_name}",
-            "function": f"compute_{factor_name}",
+            "module": module_name,
+            "function": function_name,
             "args": list(spec["args"]),
             "label": str(spec["label"]),
             "ascending": False,
@@ -231,6 +257,60 @@ FACTOR_REGISTRY.update(_discover_alpha101_factors())
 
 FACTOR_DIRECTIONS = {name: bool(spec["ascending"]) for name, spec in FACTOR_REGISTRY.items()}
 FACTOR_LABELS = {name: str(spec["label"]) for name, spec in FACTOR_REGISTRY.items()}
+
+
+FACTOR_CACHE_DIR = Path(__file__).resolve().parent / "factor_cache"
+
+
+def _factor_cache_path(factor_name: str, start_date: str, end_date: str) -> Path:
+    """构造因子缓存文件路径。文件名包含日期范围，确保不同区间互不复用。"""
+    safe_name = factor_name.replace("/", "_").replace("\\", "_")
+    return FACTOR_CACHE_DIR / f"{safe_name}__{start_date}_{end_date}.pkl"
+
+
+def _load_factor_from_cache(factor_name: str, start_date: str, end_date: str) -> pd.DataFrame | None:
+    """命中缓存时加载因子矩阵；未命中或读取失败返回 None。"""
+    cache_path = _factor_cache_path(factor_name, start_date, end_date)
+    if not cache_path.exists():
+        return None
+    try:
+        cached = pd.read_pickle(cache_path)
+    except Exception as exc:  # pragma: no cover - 缓存损坏时回退重新计算
+        print(f"[缓存] 读取 {cache_path.name} 失败，将重新计算：{exc}")
+        return None
+    if not isinstance(cached, pd.DataFrame):
+        return None
+    return cached
+
+
+def _save_factor_to_cache(factor_name: str, start_date: str, end_date: str, factor_df: pd.DataFrame) -> None:
+    """把因子矩阵写入缓存文件，确保目录存在。"""
+    FACTOR_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    cache_path = _factor_cache_path(factor_name, start_date, end_date)
+    try:
+        factor_df.to_pickle(cache_path)
+    except Exception as exc:  # pragma: no cover - 写缓存失败不影响主流程
+        print(f"[缓存] 写入 {cache_path.name} 失败：{exc}")
+
+
+def _list_factor_cache_files() -> list[Path]:
+    """列出当前缓存目录下的全部因子缓存文件。"""
+    if not FACTOR_CACHE_DIR.exists():
+        return []
+    return sorted(FACTOR_CACHE_DIR.glob("*.pkl"))
+
+
+def _clear_factor_cache() -> tuple[int, list[str]]:
+    """删除全部因子缓存文件。返回 (删除数量, 失败文件列表)。"""
+    deleted = 0
+    failures: list[str] = []
+    for cache_file in _list_factor_cache_files():
+        try:
+            cache_file.unlink()
+            deleted += 1
+        except Exception as exc:  # pragma: no cover - 极少触发
+            failures.append(f"{cache_file.name}: {exc}")
+    return deleted, failures
 
 
 def _compute_registered_factor(factor_name: str, data_bundle: dict[str, object]) -> pd.DataFrame:
@@ -510,10 +590,23 @@ class StrategyRunDialog:
         self.alpha101_summary_var = tk.StringVar(value=self._build_alpha101_summary())
         ttk.Label(alpha101_frame, textvariable=self.alpha101_summary_var, foreground="#666666").pack(side="left", padx=(10, 0))
 
-        ttk.Label(container, text="运行到第几阶段").grid(row=6, column=0, sticky="nw")
+        ttk.Label(container, text="因子缓存").grid(row=6, column=0, sticky="nw", pady=(0, 12))
+        cache_frame = ttk.Frame(container)
+        cache_frame.grid(row=6, column=1, sticky="w", pady=(0, 12))
+        self.use_cache_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(
+            cache_frame,
+            text="启用因子缓存（按日期范围复用，命中时跳过计算）",
+            variable=self.use_cache_var,
+        ).pack(side="left")
+        ttk.Button(cache_frame, text="清除缓存", command=self._clear_cache).pack(side="left", padx=(10, 0))
+        self.cache_status_var = tk.StringVar(value=self._build_cache_status_text())
+        ttk.Label(cache_frame, textvariable=self.cache_status_var, foreground="#666666").pack(side="left", padx=(10, 0))
+
+        ttk.Label(container, text="运行到第几阶段").grid(row=7, column=0, sticky="nw")
         self.max_stage_var = tk.IntVar(value=4)
         stage_frame = ttk.Frame(container)
-        stage_frame.grid(row=6, column=1, sticky="w")
+        stage_frame.grid(row=7, column=1, sticky="w")
         for stage, label in [
             (1, "阶段1：单因子评估"),
             (2, "阶段2：指标初筛"),
@@ -523,16 +616,16 @@ class StrategyRunDialog:
             ttk.Radiobutton(stage_frame, text=label, variable=self.max_stage_var, value=stage).pack(anchor="w", pady=1)
 
         ttk.Label(container, text="默认日期沿用当前策略原始范围，可直接修改。", foreground="#666666").grid(
-            row=7, column=0, columnspan=2, sticky="w", pady=(12, 4)
+            row=8, column=0, columnspan=2, sticky="w", pady=(12, 4)
         )
 
         self.message_var = tk.StringVar(value="")
         ttk.Label(container, textvariable=self.message_var, foreground="#cc3333").grid(
-            row=8, column=0, columnspan=2, sticky="w", pady=(4, 10)
+            row=9, column=0, columnspan=2, sticky="w", pady=(4, 10)
         )
 
         button_frame = ttk.Frame(container)
-        button_frame.grid(row=9, column=0, columnspan=2, sticky="e")
+        button_frame.grid(row=10, column=0, columnspan=2, sticky="e")
         ttk.Button(button_frame, text="取消", command=self._cancel).pack(side="right", padx=(8, 0))
         ttk.Button(button_frame, text="开始运行", command=self._confirm).pack(side="right")
 
@@ -647,6 +740,44 @@ class StrategyRunDialog:
         self.selected_alpha101_factors = selected
         self._sync_alpha101_main_state()
 
+    def _build_cache_status_text(self) -> str:
+        """统计当前缓存目录下的因子文件数量与体积。"""
+        files = _list_factor_cache_files()
+        if not files:
+            return "当前缓存：0 个文件"
+        total_bytes = sum(f.stat().st_size for f in files if f.exists())
+        size_mb = total_bytes / (1024 * 1024)
+        return f"当前缓存：{len(files)} 个文件，约 {size_mb:.1f} MB"
+
+    def _refresh_cache_status(self) -> None:
+        """刷新缓存状态文本。"""
+        self.cache_status_var.set(self._build_cache_status_text())
+
+    def _clear_cache(self) -> None:
+        """点击「清除缓存」按钮：弹确认框并删除全部缓存文件。"""
+        files = _list_factor_cache_files()
+        if not files:
+            messagebox.showinfo("清除因子缓存", "当前没有缓存文件。", parent=self.root)
+            self._refresh_cache_status()
+            return
+        confirmed = messagebox.askyesno(
+            "清除因子缓存",
+            f"将删除 {len(files)} 个缓存文件，操作不可恢复，是否继续？",
+            parent=self.root,
+        )
+        if not confirmed:
+            return
+        deleted, failures = _clear_factor_cache()
+        self._refresh_cache_status()
+        if failures:
+            messagebox.showwarning(
+                "清除因子缓存",
+                f"已删除 {deleted} 个文件，{len(failures)} 个失败：\n" + "\n".join(failures),
+                parent=self.root,
+            )
+        else:
+            messagebox.showinfo("清除因子缓存", f"已删除 {deleted} 个缓存文件。", parent=self.root)
+
     def _cancel(self) -> None:
         self.result = None
         self.root.destroy()
@@ -675,6 +806,7 @@ class StrategyRunDialog:
             "end_date": end_date,
             "max_stage": int(self.max_stage_var.get()),
             "selected_factors": selected_factors,
+            "use_cache": bool(self.use_cache_var.get()),
         }
         self.root.destroy()
 
@@ -917,6 +1049,7 @@ def run_strategy(
     max_stage: int = 4,
     selected_factors: list[str] | None = None,
     progress_callback: Callable[[str, str, int | None, int | None], None] | None = None,
+    use_cache: bool = False,
 ) -> dict[str, object]:
     """运行多因子研究与回测主流程。"""
     if max_stage < 1 or max_stage > 4:
@@ -972,14 +1105,33 @@ def run_strategy(
 
     all_factor_dict = {}
     total_factors = len(selected_factors)
+    cache_start = str(data_bundle.get("start_date", start_date or ""))
+    cache_end = str(data_bundle.get("end_date", end_date or ""))
+    if use_cache:
+        print(f"[缓存] 已启用因子缓存，目录：{FACTOR_CACHE_DIR}，区间：{cache_start} ~ {cache_end}")
     for factor_index, factor_name in enumerate(selected_factors, start=1):
+        cached_df: pd.DataFrame | None = None
+        if use_cache:
+            cached_df = _load_factor_from_cache(factor_name, cache_start, cache_end)
+        if cached_df is not None:
+            report_progress(
+                "阶段0：计算候选因子",
+                f"命中缓存 {factor_name}，跳过计算",
+                factor_index,
+                total_factors,
+            )
+            all_factor_dict[factor_name] = cached_df
+            continue
         report_progress(
             "阶段0：计算候选因子",
             f"正在计算 {factor_name} ...",
             factor_index,
             total_factors,
         )
-        all_factor_dict[factor_name] = _compute_registered_factor(factor_name, data_bundle)
+        factor_df = _compute_registered_factor(factor_name, data_bundle)
+        all_factor_dict[factor_name] = factor_df
+        if use_cache:
+            _save_factor_to_cache(factor_name, cache_start, cache_end, factor_df)
     raw_factor_dict = {name: all_factor_dict[name] for name in selected_factors if name in all_factor_dict}
     if not raw_factor_dict:
         raise ValueError("所选因子未注册，无法运行")
@@ -1273,6 +1425,7 @@ if __name__ == "__main__":
                     max_stage=int(run_params["max_stage"]),
                     selected_factors=list(run_params["selected_factors"]),
                     progress_callback=None,
+                    use_cache=bool(run_params.get("use_cache", False)),
                 )
             except Exception as exc:  # pragma: no cover - 运行期异常展示
                 run_error_holder.append(exc)

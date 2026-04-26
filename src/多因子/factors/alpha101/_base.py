@@ -119,3 +119,40 @@ def max_df(left: pd.DataFrame, right: pd.DataFrame | float) -> pd.DataFrame:
 
 def vwap(amount_df: pd.DataFrame, volume_df: pd.DataFrame) -> pd.DataFrame:
     return _safe_divide(amount_df, volume_df)
+
+
+def ternary(condition: pd.DataFrame, true_value: pd.DataFrame | float | int, false_value: pd.DataFrame | float | int) -> pd.DataFrame:
+    true_df = true_value if isinstance(true_value, pd.DataFrame) else pd.DataFrame(true_value, index=condition.index, columns=condition.columns)
+    false_df = false_value if isinstance(false_value, pd.DataFrame) else pd.DataFrame(false_value, index=condition.index, columns=condition.columns)
+    return true_df.where(condition, false_df)
+
+
+def less(left: pd.DataFrame, right: pd.DataFrame | float | int) -> pd.DataFrame:
+    return left.lt(right) if not isinstance(right, pd.DataFrame) else left.lt(right)
+
+
+def greater(left: pd.DataFrame, right: pd.DataFrame | float | int) -> pd.DataFrame:
+    return left.gt(right) if not isinstance(right, pd.DataFrame) else left.gt(right)
+
+
+def equal(left: pd.DataFrame, right: pd.DataFrame | float | int) -> pd.DataFrame:
+    return left.eq(right) if not isinstance(right, pd.DataFrame) else left.eq(right)
+
+
+def indneutralize(df: pd.DataFrame, groups: pd.Series | dict | None = None) -> pd.DataFrame:
+    if groups is None:
+        return df.sub(df.mean(axis=1), axis=0)
+    group_series = pd.Series(groups)
+    aligned = group_series.reindex(df.columns)
+    result = df.copy() * np.nan
+    for group_name in aligned.dropna().unique():
+        cols = aligned.index[aligned == group_name]
+        result.loc[:, cols] = df.loc[:, cols].sub(df.loc[:, cols].mean(axis=1), axis=0)
+    return result
+
+
+def decay_exp(df: pd.DataFrame, window: int, factor: float = 0.9) -> pd.DataFrame:
+    weights = np.power(factor, np.arange(window - 1, -1, -1, dtype=float))
+    weight_sum = weights.sum()
+    return df.rolling(window, min_periods=window).apply(lambda values: float(np.dot(values, weights) / weight_sum), raw=True)
+
