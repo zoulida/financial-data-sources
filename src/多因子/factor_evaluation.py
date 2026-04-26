@@ -77,6 +77,9 @@ def _calc_cross_section_corr(
     method: str,
 ) -> float:
     merged = pd.concat([factor_row, return_row], axis=1, keys=["factor", "future_return"]).dropna()
+    merged["factor"] = pd.to_numeric(merged["factor"], errors="coerce")
+    merged["future_return"] = pd.to_numeric(merged["future_return"], errors="coerce")
+    merged = merged.replace([np.inf, -np.inf], np.nan).dropna()
     if len(merged) < 3:
         return np.nan
     return float(merged["factor"].corr(merged["future_return"], method=method))
@@ -120,6 +123,9 @@ def calc_rr_series(
             axis=1,
             keys=["factor", "future_return"],
         ).dropna()
+        merged["factor"] = pd.to_numeric(merged["factor"], errors="coerce")
+        merged["future_return"] = pd.to_numeric(merged["future_return"], errors="coerce")
+        merged = merged.replace([np.inf, -np.inf], np.nan).dropna()
         if merged.empty:
             rr_dict[dt] = np.nan
             continue
@@ -173,9 +179,10 @@ def run_single_factor_backtest(
     rebalance_mask: pd.Series,
     benchmark_close: pd.Series | None,
     hold_num: int,
+    factor_ascending: bool = False,
 ) -> dict[str, Any]:
     """运行单因子回测。"""
-    factor_score = rank_score(mask_factor(factor_df, tradable_mask), ascending=False)
+    factor_score = rank_score(mask_factor(factor_df, tradable_mask), ascending=factor_ascending)
     selection_df = select_top_n(factor_score, n=hold_num)
 
     weights = pd.DataFrame(0.0, index=selection_df.index, columns=selection_df.columns)

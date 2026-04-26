@@ -1,0 +1,2 @@
+﻿factor,direction,strict_decreasing,strict_increasing,decreasing_score,increasing_score,best_monotonic_score,spearman,top_bottom_spread,abs_top_bottom_spread,g1_return,g2_return,g3_return,g4_return,g5_return
+alpha158.gap_ratio,decreasing,False,False,0.5,0.5,0.5,-0.6,0.005740339779125,0.005740339779125,0.0055513588413323,0.0064012182006697,0.0064340048760719,0.0053250276996503,-0.0001889809377927

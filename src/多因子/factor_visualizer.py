@@ -25,8 +25,21 @@ from src.多因子.factor_evaluation import (
     run_single_factor_backtest,
     summarize_factor_metrics,
 )
-from src.多因子.factors.momentum import compute_momentum_factor
-from src.多因子.factors.risk_adjusted_momentum import compute_risk_adjusted_momentum
+from src.多因子.main import (
+    Alpha101SelectionDialog,
+    Alpha158SelectionDialog,
+    Alpha191SelectionDialog,
+    FACTOR_DIRECTIONS,
+    FACTOR_LABELS,
+    FACTOR_REGISTRY,
+    _compute_registered_factor,
+    _iter_factor_names,
+    _load_last_run_config,
+    _load_last_run_dates,
+    _load_last_selected_factors,
+    _make_label_text,
+    _save_last_run_config,
+)
 from src.多因子.scoring import mask_factor, rank_score
 from src.多因子.universe import build_tradable_mask
 
@@ -65,20 +78,6 @@ def _configure_plot_font() -> None:
 _configure_plot_font()
 
 
-FACTOR_REGISTRY: dict[str, tuple[Callable[[pd.DataFrame], pd.DataFrame], bool, str]] = {
-    "momentum_20": (
-        lambda close_df: compute_momentum_factor(close_df, window=config.MOMENTUM_WINDOW),
-        False,
-        "20日动量",
-    ),
-    "risk_adjusted_momentum_20": (
-        lambda close_df: compute_risk_adjusted_momentum(close_df, window=config.RISK_ADJUSTED_WINDOW),
-        False,
-        "20日风险调整动量",
-    ),
-}
-
-
 class VisualizerDialog:
     """运行前弹出参数选择窗口。"""
 
@@ -89,7 +88,22 @@ class VisualizerDialog:
 
     def __init__(self) -> None:
         self.result: dict[str, object] | None = None
-        default_start, default_end, _ = get_strategy_date_range()
+        latest_start, latest_end, _ = get_strategy_date_range()
+        self._latest_start = latest_start
+        self._latest_end = latest_end
+        last_start, last_end = _load_last_run_dates()
+        default_start = last_start or latest_start
+        default_end = last_end or latest_end
+        last_run_config = _load_last_run_config()
+        default_base_factors = _load_last_selected_factors("base", _iter_factor_names("base"))
+        self.selected_alpha158_factors: list[str] = _load_last_selected_factors("alpha158")
+        self.selected_alpha101_factors: list[str] = _load_last_selected_factors("alpha101")
+        self.selected_alpha191_factors: list[str] = _load_last_selected_factors("alpha191")
+        default_charts = last_run_config.get("visualizer_charts")
+        if not isinstance(default_charts, list):
+            default_charts = list(CHART_OPTIONS.keys())
+        default_chart_set = {chart for chart in default_charts if isinstance(chart, str)}
+        default_show_plots = bool(last_run_config.get("visualizer_show_plots", False))
 
         self.root = tk.Tk()
         self.root.title("因子可视化参数选择")
@@ -121,33 +135,37 @@ class VisualizerDialog:
         factor_frame.pack(fill="both", expand=False, pady=(0, 10))
         self.factor_vars: dict[str, tk.BooleanVar] = {}
 
-        factor_hint = ttk.Label(
-            factor_frame,
-            text="因子较多时可滚动查看，下方勾选框支持多行展示。",
-            foreground="#666666",
-        )
+        factor_hint = ttk.Label(factor_frame, text="与多因子主程序使用同一套因子注册和分组选择。", foreground="#666666")
         factor_hint.pack(anchor="w", pady=(0, 8))
 
-        factor_canvas_frame = ttk.Frame(factor_frame)
-        factor_canvas_frame.pack(fill="both", expand=True)
+        action_frame = ttk.Frame(factor_frame)
+        action_frame.pack(anchor="w", pady=(0, 8))
+        ttk.Button(action_frame, text="基础因子全选", command=self._select_all_factors).pack(side="left")
+        ttk.Button(action_frame, text="基础因子全不选", command=self._clear_all_factors).pack(side="left", padx=(8, 0))
+        ttk.Button(action_frame, text="基础因子反选", command=self._invert_factor_selection).pack(side="left", padx=(8, 0))
 
-        self.factor_canvas = tk.Canvas(factor_canvas_frame, height=220, highlightthickness=0)
-        self.factor_scrollbar = ttk.Scrollbar(factor_canvas_frame, orient="vertical", command=self.factor_canvas.yview)
-        self.factor_canvas.configure(yscrollcommand=self.factor_scrollbar.set)
-
-        self.factor_scrollbar.pack(side="right", fill="y")
-        self.factor_canvas.pack(side="left", fill="both", expand=True)
-
-        self.factor_inner = ttk.Frame(self.factor_canvas)
-        self.factor_inner_window = self.factor_canvas.create_window((0, 0), window=self.factor_inner, anchor="nw")
-
-        self.factor_inner.bind("<Configure>", self._on_factor_inner_configure)
-        self.factor_canvas.bind("<Configure>", self._on_factor_canvas_configure)
-
-        for factor_name, (_, _, factor_label) in FACTOR_REGISTRY.items():
-            var = tk.BooleanVar(value=True)
+        base_frame = ttk.Frame(factor_frame)
+        base_frame.pack(anchor="w", fill="x", pady=(0, 8))
+        ttk.Label(base_frame, text="基础因子").grid(row=0, column=0, sticky="nw", padx=(0, 12))
+        base_check_frame = ttk.Frame(base_frame)
+        base_check_frame.grid(row=0, column=1, sticky="w")
+        for row_index, factor_name in enumerate(_iter_factor_names("base")):
+            var = tk.BooleanVar(value=factor_name in default_base_factors)
             self.factor_vars[factor_name] = var
-            ttk.Checkbutton(self.factor_inner, text=f"{factor_name}（{factor_label}）", variable=var).pack(anchor="w", pady=2)
+            ttk.Checkbutton(base_check_frame, text=_make_label_text(factor_name), variable=var).grid(
+                row=row_index,
+                column=0,
+                sticky="w",
+                pady=2,
+            )
+
+        self.alpha158_summary_var = tk.StringVar(value="")
+        self.alpha101_summary_var = tk.StringVar(value="")
+        self.alpha191_summary_var = tk.StringVar(value="")
+        self._build_group_selector(factor_frame, "Alpha158 因子", "启用 Alpha158", self.alpha158_summary_var, self._open_alpha158_dialog)
+        self._build_group_selector(factor_frame, "Alpha101 因子", "启用 Alpha101", self.alpha101_summary_var, self._open_alpha101_dialog)
+        self._build_group_selector(factor_frame, "国君朝阳191 因子", "启用 国君朝阳191", self.alpha191_summary_var, self._open_alpha191_dialog)
+        self._refresh_group_summaries()
 
         date_frame = ttk.LabelFrame(self.container, text="2. 选择回测日期", padding=12)
         date_frame.pack(fill="x", pady=(0, 10))
@@ -156,24 +174,32 @@ class VisualizerDialog:
         self.start_entry = ttk.Entry(date_frame, width=20)
         self.start_entry.grid(row=0, column=1, sticky="w", pady=(0, 8))
         self.start_entry.insert(0, default_start)
+        ttk.Button(date_frame, text="设为最新", command=self._reset_dates_to_latest).grid(
+            row=0,
+            column=2,
+            sticky="w",
+            padx=(8, 0),
+            pady=(0, 8),
+        )
         self.end_entry = ttk.Entry(date_frame, width=20)
         self.end_entry.grid(row=1, column=1, sticky="w")
         self.end_entry.insert(0, default_end)
-        ttk.Label(date_frame, text="默认值来自统一日期函数，可直接修改。", foreground="#666666").grid(
-            row=2, column=0, columnspan=2, sticky="w", pady=(8, 0)
+        self.date_hint_var = tk.StringVar(value=f"最新可用范围：{self._latest_start} ~ {self._latest_end}")
+        ttk.Label(date_frame, textvariable=self.date_hint_var, foreground="#666666").grid(
+            row=2, column=0, columnspan=3, sticky="w", pady=(8, 0)
         )
 
         chart_frame = ttk.LabelFrame(self.container, text="3. 选择要输出的图（默认全选）", padding=12)
         chart_frame.pack(fill="x", pady=(0, 10))
         self.chart_vars: dict[str, tk.BooleanVar] = {}
         for chart_key, chart_label in CHART_OPTIONS.items():
-            var = tk.BooleanVar(value=True)
+            var = tk.BooleanVar(value=chart_key in default_chart_set)
             self.chart_vars[chart_key] = var
             ttk.Checkbutton(chart_frame, text=chart_label, variable=var).pack(anchor="w", pady=2)
 
         display_frame = ttk.LabelFrame(self.container, text="4. 是否生成后直接弹图", padding=12)
         display_frame.pack(fill="x", pady=(0, 10))
-        self.show_plots_var = tk.BooleanVar(value=False)
+        self.show_plots_var = tk.BooleanVar(value=default_show_plots)
         ttk.Radiobutton(display_frame, text="不弹出（默认）", variable=self.show_plots_var, value=False).pack(anchor="w")
         ttk.Radiobutton(display_frame, text="弹出图片", variable=self.show_plots_var, value=True).pack(anchor="w")
 
@@ -201,32 +227,89 @@ class VisualizerDialog:
         self.main_canvas.itemconfigure(self.container_window, width=event.width)
 
     def _on_factor_inner_configure(self, _event: tk.Event) -> None:
-        self.factor_canvas.configure(scrollregion=self.factor_canvas.bbox("all"))
+        pass
 
     def _on_factor_canvas_configure(self, event: tk.Event) -> None:
-        self.factor_canvas.itemconfigure(self.factor_inner_window, width=event.width)
+        del event
 
     def _on_mousewheel(self, event: tk.Event) -> None:
-        widget = self.root.winfo_containing(self.root.winfo_pointerx(), self.root.winfo_pointery())
-        if widget is None:
-            return
-
-        factor_widgets = {self.factor_canvas, self.factor_inner}
-        parent = widget
-        while parent is not None:
-            if parent in factor_widgets:
-                self.factor_canvas.yview_scroll(int(-event.delta / 120), "units")
-                return
-            parent = parent.master
-
         self.main_canvas.yview_scroll(int(-event.delta / 120), "units")
+
+    def _select_all_factors(self) -> None:
+        for var in self.factor_vars.values():
+            var.set(True)
+
+    def _clear_all_factors(self) -> None:
+        for var in self.factor_vars.values():
+            var.set(False)
+
+    def _invert_factor_selection(self) -> None:
+        for var in self.factor_vars.values():
+            var.set(not var.get())
+
+    def _build_group_selector(
+        self,
+        parent: ttk.Frame,
+        title: str,
+        check_text: str,
+        summary_var: tk.StringVar,
+        command: Callable[[], None],
+    ) -> None:
+        row_frame = ttk.Frame(parent)
+        row_frame.pack(anchor="w", fill="x", pady=4)
+        ttk.Label(row_frame, text=title, width=16).pack(side="left")
+        ttk.Button(row_frame, text=f"选择 {title}...", command=command).pack(side="left", padx=(0, 10))
+        ttk.Label(row_frame, text=check_text, foreground="#666666").pack(side="left")
+        ttk.Label(row_frame, textvariable=summary_var, foreground="#666666").pack(side="left", padx=(10, 0))
+
+    def _refresh_group_summaries(self) -> None:
+        self.alpha158_summary_var.set(self._build_group_summary("alpha158", self.selected_alpha158_factors))
+        self.alpha101_summary_var.set(self._build_group_summary("alpha101", self.selected_alpha101_factors))
+        self.alpha191_summary_var.set(self._build_group_summary("alpha191", self.selected_alpha191_factors))
+
+    def _build_group_summary(self, group: str, selected_factors: list[str]) -> str:
+        return f"已选择 {len(selected_factors)} / {len(_iter_factor_names(group))} 个因子"
+
+    def _open_alpha158_dialog(self) -> None:
+        selected = Alpha158SelectionDialog(self.selected_alpha158_factors).show()
+        if selected is not None:
+            self.selected_alpha158_factors = selected
+            self._refresh_group_summaries()
+
+    def _open_alpha101_dialog(self) -> None:
+        selected = Alpha101SelectionDialog(self.selected_alpha101_factors).show()
+        if selected is not None:
+            self.selected_alpha101_factors = selected
+            self._refresh_group_summaries()
+
+    def _open_alpha191_dialog(self) -> None:
+        selected = Alpha191SelectionDialog(self.selected_alpha191_factors).show()
+        if selected is not None:
+            self.selected_alpha191_factors = selected
+            self._refresh_group_summaries()
+
+    def _reset_dates_to_latest(self) -> None:
+        latest_start, latest_end, _ = get_strategy_date_range()
+        self._latest_start = latest_start
+        self._latest_end = latest_end
+        self.start_entry.delete(0, tk.END)
+        self.start_entry.insert(0, latest_start)
+        self.end_entry.delete(0, tk.END)
+        self.end_entry.insert(0, latest_end)
+        self.date_hint_var.set(f"最新可用范围：{latest_start} ~ {latest_end}")
 
     def _cancel(self) -> None:
         self.result = None
         self.root.destroy()
 
     def _confirm(self) -> None:
-        selected_factors = [name for name, var in self.factor_vars.items() if var.get()]
+        selected_base_factors = [name for name, var in self.factor_vars.items() if var.get()]
+        selected_factors = (
+            selected_base_factors
+            + self.selected_alpha158_factors
+            + self.selected_alpha101_factors
+            + self.selected_alpha191_factors
+        )
         selected_charts = [name for name, var in self.chart_vars.items() if var.get()]
         start_date = self.start_entry.get().strip()
         end_date = self.end_entry.get().strip()
@@ -254,6 +337,17 @@ class VisualizerDialog:
             "start_date": start_date,
             "end_date": end_date,
         }
+        last_run_config = _load_last_run_config()
+        last_run_config.update(
+            {
+                "start_date": start_date,
+                "end_date": end_date,
+                "selected_factors": selected_factors,
+                "visualizer_charts": selected_charts,
+                "visualizer_show_plots": bool(self.show_plots_var.get()),
+            }
+        )
+        _save_last_run_config(last_run_config)
         self.root.destroy()
 
     def show(self) -> dict[str, object] | None:
@@ -398,6 +492,85 @@ def _save_group_return_table(base_dir: Path, group_return_df: pd.DataFrame) -> N
     summary.to_csv(base_dir / "group_return_summary.csv", encoding="utf-8-sig")
 
 
+def _calc_group_monotonicity(factor_name: str, group_return_df: pd.DataFrame) -> pd.DataFrame:
+    if group_return_df.empty:
+        return pd.DataFrame(
+            [
+                {
+                    "factor": factor_name,
+                    "direction": "none",
+                    "strict_decreasing": False,
+                    "strict_increasing": False,
+                    "decreasing_score": np.nan,
+                    "increasing_score": np.nan,
+                    "best_monotonic_score": np.nan,
+                    "spearman": np.nan,
+                    "top_bottom_spread": np.nan,
+                    "abs_top_bottom_spread": np.nan,
+                    "g1_return": np.nan,
+                    "g2_return": np.nan,
+                    "g3_return": np.nan,
+                    "g4_return": np.nan,
+                    "g5_return": np.nan,
+                }
+            ]
+        )
+
+    avg_returns = group_return_df.mean().reindex(["G1", "G2", "G3", "G4", "G5"])
+    values = avg_returns.to_numpy(dtype=float)
+    valid_values = values[~np.isnan(values)]
+    if len(valid_values) < 2:
+        spearman = np.nan
+        diffs = np.array([], dtype=float)
+    else:
+        spearman = pd.Series(values).corr(pd.Series(np.arange(1, len(values) + 1)), method="spearman")
+        diffs = np.diff(values)
+
+    valid_diffs = diffs[~np.isnan(diffs)]
+    if len(valid_diffs) == 0:
+        decreasing_score = np.nan
+        increasing_score = np.nan
+        strict_decreasing = False
+        strict_increasing = False
+    else:
+        decreasing_score = float((valid_diffs < 0).sum() / len(valid_diffs))
+        increasing_score = float((valid_diffs > 0).sum() / len(valid_diffs))
+        strict_decreasing = bool((valid_diffs < 0).all())
+        strict_increasing = bool((valid_diffs > 0).all())
+
+    if pd.isna(spearman):
+        direction = "none"
+    elif spearman < 0:
+        direction = "decreasing"
+    elif spearman > 0:
+        direction = "increasing"
+    else:
+        direction = "flat"
+
+    top_bottom_spread = values[0] - values[-1] if not np.isnan(values[0]) and not np.isnan(values[-1]) else np.nan
+    return pd.DataFrame(
+        [
+            {
+                "factor": factor_name,
+                "direction": direction,
+                "strict_decreasing": strict_decreasing,
+                "strict_increasing": strict_increasing,
+                "decreasing_score": decreasing_score,
+                "increasing_score": increasing_score,
+                "best_monotonic_score": np.nanmax([decreasing_score, increasing_score]),
+                "spearman": spearman,
+                "top_bottom_spread": top_bottom_spread,
+                "abs_top_bottom_spread": abs(top_bottom_spread) if not np.isnan(top_bottom_spread) else np.nan,
+                "g1_return": values[0],
+                "g2_return": values[1],
+                "g3_return": values[2],
+                "g4_return": values[3],
+                "g5_return": values[4],
+            }
+        ]
+    )
+
+
 def visualize_factor(
     factor_name: str,
     selected_charts: list[str],
@@ -409,7 +582,8 @@ def visualize_factor(
     if factor_name not in FACTOR_REGISTRY:
         raise ValueError(f"不支持的因子：{factor_name}，可选值：{', '.join(FACTOR_REGISTRY.keys())}")
 
-    factor_builder, ascending, factor_label = FACTOR_REGISTRY[factor_name]
+    ascending = FACTOR_DIRECTIONS[factor_name]
+    factor_label = FACTOR_LABELS[factor_name]
 
     data_bundle = build_data_bundle(
         max_price=config.MAX_PRICE,
@@ -429,7 +603,7 @@ def visualize_factor(
     rebalance_mask = build_rebalance_mask(close_df.index, freq=config.REBALANCE_FREQ)
     forward_returns_df = build_forward_returns(close_df, rebalance_mask)
 
-    raw_factor_df = factor_builder(close_df)
+    raw_factor_df = _compute_registered_factor(factor_name, data_bundle)
     masked_factor_df = mask_factor(raw_factor_df, tradable_mask)
     factor_score_df = rank_score(masked_factor_df, ascending=ascending)
 
@@ -463,6 +637,8 @@ def visualize_factor(
     )
     factor_score_df.to_csv(output_dir / "factor_score_matrix.csv", encoding="utf-8-sig")
     _save_group_return_table(output_dir, group_return_df)
+    monotonicity_df = _calc_group_monotonicity(factor_name, group_return_df)
+    monotonicity_df.to_csv(output_dir / "group_monotonicity_summary.csv", index=False, encoding="utf-8-sig")
 
     opened_paths: list[Path] = []
     if "factor_dashboard" in selected_charts:
@@ -530,14 +706,33 @@ def main() -> None:
     start_date = str(selected["start_date"])
     end_date = str(selected["end_date"])
 
+    output_dirs: list[Path] = []
     for factor_name in factors:
-        visualize_factor(
-            factor_name=factor_name,
-            selected_charts=charts,
-            show_plots=show_plots,
-            start_date=start_date,
-            end_date=end_date,
+        output_dirs.append(
+            visualize_factor(
+                factor_name=factor_name,
+                selected_charts=charts,
+                show_plots=show_plots,
+                start_date=start_date,
+                end_date=end_date,
+            )
         )
+
+    monotonicity_rows: list[pd.DataFrame] = []
+    for output_dir in output_dirs:
+        summary_path = output_dir / "group_monotonicity_summary.csv"
+        if summary_path.exists():
+            monotonicity_rows.append(pd.read_csv(summary_path))
+    if monotonicity_rows:
+        batch_summary = pd.concat(monotonicity_rows, ignore_index=True)
+        batch_summary = batch_summary.sort_values(
+            by=["best_monotonic_score", "abs_top_bottom_spread", "spearman"],
+            ascending=[False, False, False],
+        )
+        summary_dir = Path(__file__).resolve().parent / config.OUTPUT_DIR / "factor_visualization"
+        batch_summary_path = summary_dir / "all_factor_monotonicity_summary.csv"
+        batch_summary.to_csv(batch_summary_path, index=False, encoding="utf-8-sig")
+        print(f"全因子单调性汇总：{batch_summary_path}")
 
 
 if __name__ == "__main__":

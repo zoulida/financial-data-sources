@@ -84,9 +84,11 @@ def run_vectorbt_backtest(
     close = close_df.copy()
     close.index = pd.to_datetime(close.index.astype(str))
 
-    # 目标权重矩阵要和收盘价矩阵严格对齐。
-    weights = target_weights.reindex_like(close_df).fillna(0.0).copy()
+    # 仅在调仓日提交目标权重订单；非调仓日保持 NaN，避免 VectorBT 每天按 targetpercent 重平衡。
+    weights = target_weights.reindex_like(close_df).copy()
     weights.index = close.index
+    active_order_mask = weights.ne(weights.shift()).any(axis=1)
+    weights = weights.where(active_order_mask, other=pd.NA).astype(float)
 
     portfolio = vbt.Portfolio.from_orders(
         close=close,

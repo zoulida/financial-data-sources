@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import numpy as np
 import pandas as pd
 
 
@@ -18,6 +19,7 @@ def mask_factor(factor_df: pd.DataFrame, tradable_mask: pd.DataFrame) -> pd.Data
     if factor_df.empty:
         return factor_df.copy()
 
+    factor_df = factor_df.apply(pd.to_numeric, errors="coerce").replace([np.inf, -np.inf], np.nan)
     aligned_mask = tradable_mask.reindex_like(factor_df).fillna(False)
     return factor_df.where(aligned_mask)
 
@@ -39,6 +41,7 @@ def rank_score(factor_df: pd.DataFrame, ascending: bool = False) -> pd.DataFrame
     if factor_df.empty:
         return factor_df.copy()
 
+    factor_df = factor_df.apply(pd.to_numeric, errors="coerce").replace([np.inf, -np.inf], np.nan)
     rank_df = factor_df.rank(axis=1, ascending=ascending, pct=True, method="average")
     return rank_df
 

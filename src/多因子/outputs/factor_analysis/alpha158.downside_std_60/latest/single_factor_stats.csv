@@ -1,11 +1,11 @@
 ﻿,value
 Start,2024-11-01 00:00:00
-End,2026-04-24 00:00:00
-Period,359 days 00:00:00
+End,2026-04-23 00:00:00
+Period,358 days 00:00:00
 Start Value,1000000.0
 End Value,1000000.0
 Total Return [%],0.0
-Benchmark Return [%],29.99287741543315
+Benchmark Return [%],31.085095644606152
 Max Gross Exposure [%],0.0
 Total Fees Paid,0.0
 Max Drawdown [%],

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib
 import inspect
+import json
 import sys
 import threading
 import time
@@ -11,6 +12,7 @@ from pathlib import Path
 import tkinter as tk
 from tkinter import messagebox, ttk
 
+import numpy as np
 import pandas as pd
 
 from src.多因子 import config
@@ -238,6 +240,37 @@ def _discover_alpha101_factors() -> dict[str, dict[str, object]]:
     return discovered
 
 
+def _discover_alpha191_factors() -> dict[str, dict[str, object]]:
+    """扫描 alpha191 子目录，构建可注册因子清单。"""
+    alpha_dir = Path(__file__).resolve().parent / "factors" / "alpha191"
+    if not alpha_dir.exists():
+        return {}
+
+    unsupported_factors = {"alpha030", "alpha143"}
+    discovered: dict[str, dict[str, object]] = {}
+    for file_path in sorted(alpha_dir.glob("alpha*.py")):
+        if file_path.stem.startswith("_"):
+            continue
+        factor_name = file_path.stem
+        if factor_name in unsupported_factors:
+            continue
+        module_name = f"src.多因子.factors.alpha191.{factor_name}"
+        function_name = f"compute_{factor_name}"
+        inferred_args = _infer_factor_args(module_name, function_name)
+        if inferred_args is None:
+            continue
+        factor_key = f"alpha191.{factor_name}"
+        discovered[factor_key] = {
+            "module": module_name,
+            "function": function_name,
+            "args": inferred_args,
+            "label": f"国君朝阳191 #{factor_name.removeprefix('alpha')}",
+            "ascending": False,
+            "group": "alpha191",
+        }
+    return discovered
+
+
 FACTOR_REGISTRY: dict[str, dict[str, object]] = {
     "momentum_20": {
         "kind": "builtin",
@@ -254,6 +287,7 @@ FACTOR_REGISTRY: dict[str, dict[str, object]] = {
 }
 FACTOR_REGISTRY.update(_discover_alpha158_factors())
 FACTOR_REGISTRY.update(_discover_alpha101_factors())
+FACTOR_REGISTRY.update(_discover_alpha191_factors())
 
 FACTOR_DIRECTIONS = {name: bool(spec["ascending"]) for name, spec in FACTOR_REGISTRY.items()}
 FACTOR_LABELS = {name: str(spec["label"]) for name, spec in FACTOR_REGISTRY.items()}
@@ -298,6 +332,56 @@ def _list_factor_cache_files() -> list[Path]:
     if not FACTOR_CACHE_DIR.exists():
         return []
     return sorted(FACTOR_CACHE_DIR.glob("*.pkl"))
+
+
+LAST_RUN_PATH = Path(__file__).resolve().parent / ".last_run.json"
+
+
+def _load_last_run_config() -> dict[str, object]:
+    if not LAST_RUN_PATH.exists():
+        return {}
+    try:
+        data = json.loads(LAST_RUN_PATH.read_text(encoding="utf-8"))
+    except Exception as exc:  # pragma: no cover - 配置损坏时回退默认
+        print(f"[配置] 读取 {LAST_RUN_PATH.name} 失败，将使用默认配置：{exc}")
+        return {}
+    if isinstance(data, dict):
+        return data
+    return {}
+
+
+def _load_last_run_dates() -> tuple[str | None, str | None]:
+    """读取上次运行时使用的日期范围；无文件或解析失败返回 (None, None)。"""
+    data = _load_last_run_config()
+    start = data.get("start_date") if isinstance(data, dict) else None
+    end = data.get("end_date") if isinstance(data, dict) else None
+    if isinstance(start, str) and isinstance(end, str):
+        return start, end
+    return None, None
+
+
+def _save_last_run_config(run_config: dict[str, object]) -> None:
+    try:
+        LAST_RUN_PATH.write_text(
+            json.dumps(run_config, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+    except Exception as exc:  # pragma: no cover - 持久化失败不影响主流程
+        print(f"[配置] 写入 {LAST_RUN_PATH.name} 失败：{exc}")
+
+
+def _save_last_run_dates(start_date: str, end_date: str) -> None:
+    """保存本次运行使用的日期，下次启动作为默认值。"""
+    _save_last_run_config({"start_date": start_date, "end_date": end_date})
+
+
+def _load_last_selected_factors(group: str, default: list[str] | None = None) -> list[str]:
+    config_data = _load_last_run_config()
+    selected_factors = config_data.get("selected_factors")
+    if not isinstance(selected_factors, list):
+        return list(default or [])
+    valid_factors = set(_iter_factor_names(group))
+    return [factor for factor in selected_factors if isinstance(factor, str) and factor in valid_factors]
 
 
 def _clear_factor_cache() -> tuple[int, list[str]]:
@@ -479,6 +563,13 @@ class Alpha101SelectionDialog(FactorGroupSelectionDialog):
         super().__init__(group="alpha101", title="Alpha101", selected_factors=selected_factors)
 
 
+class Alpha191SelectionDialog(FactorGroupSelectionDialog):
+    """国君朝阳191 因子单独选择窗口。"""
+
+    def __init__(self, selected_factors: list[str] | None = None) -> None:
+        super().__init__(group="alpha191", title="国君朝阳191", selected_factors=selected_factors)
+
+
 def _iter_factor_names(group: str | None = None) -> list[str]:
     """按分组返回注册因子名称列表。"""
     factor_names: list[str] = []
@@ -500,14 +591,25 @@ class StrategyRunDialog:
 
     def __init__(self) -> None:
         self.result: dict[str, object] | None = None
-        default_start, default_end, _ = get_strategy_date_range()
-        self.selected_alpha158_factors: list[str] = []
-        self.selected_alpha101_factors: list[str] = []
+        latest_start, latest_end, _ = get_strategy_date_range()
+        self._latest_start = latest_start
+        self._latest_end = latest_end
+        last_start, last_end = _load_last_run_dates()
+        default_start = last_start or latest_start
+        default_end = last_end or latest_end
+        last_run_config = _load_last_run_config()
+        default_base_factors = _load_last_selected_factors("base", _iter_factor_names("base"))
+        self.selected_alpha158_factors: list[str] = _load_last_selected_factors("alpha158")
+        self.selected_alpha101_factors: list[str] = _load_last_selected_factors("alpha101")
+        self.selected_alpha191_factors: list[str] = _load_last_selected_factors("alpha191")
+        last_max_stage = last_run_config.get("max_stage")
+        default_max_stage = last_max_stage if isinstance(last_max_stage, int) and 1 <= last_max_stage <= 4 else 4
+        default_use_cache = bool(last_run_config.get("use_cache", False))
 
         self.root = tk.Tk()
         self.root.title("多因子运行参数")
         self.root.resizable(False, False)
-        self._center_window(680, 560)
+        self._center_window(760, 620)
 
         container = ttk.Frame(self.root, padding=16)
         container.pack(fill="both", expand=True)
@@ -516,14 +618,23 @@ class StrategyRunDialog:
         title.grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 14))
 
         ttk.Label(container, text="开始日期（YYYYMMDD）").grid(row=1, column=0, sticky="w", pady=(0, 8))
-        self.start_entry = ttk.Entry(container, width=22)
-        self.start_entry.grid(row=1, column=1, sticky="w", pady=(0, 8))
+        start_frame = ttk.Frame(container)
+        start_frame.grid(row=1, column=1, sticky="w", pady=(0, 8))
+        self.start_entry = ttk.Entry(start_frame, width=22)
+        self.start_entry.pack(side="left")
         self.start_entry.insert(0, default_start)
+        ttk.Button(start_frame, text="设为最新", command=self._reset_dates_to_latest).pack(side="left", padx=(8, 0))
 
         ttk.Label(container, text="结束日期（YYYYMMDD）").grid(row=2, column=0, sticky="w", pady=(0, 12))
-        self.end_entry = ttk.Entry(container, width=22)
-        self.end_entry.grid(row=2, column=1, sticky="w", pady=(0, 12))
+        end_frame = ttk.Frame(container)
+        end_frame.grid(row=2, column=1, sticky="w", pady=(0, 12))
+        self.end_entry = ttk.Entry(end_frame, width=22)
+        self.end_entry.pack(side="left")
         self.end_entry.insert(0, default_end)
+        self.date_hint_var = tk.StringVar(
+            value=f"最新可用范围：{self._latest_start} ~ {self._latest_end}"
+        )
+        ttk.Label(end_frame, textvariable=self.date_hint_var, foreground="#666666").pack(side="left", padx=(8, 0))
 
         ttk.Label(container, text="基础因子（可多选）").grid(row=3, column=0, sticky="nw", pady=(0, 10))
         factor_section = ttk.Frame(container)
@@ -540,7 +651,7 @@ class StrategyRunDialog:
         factor_check_frame.pack(anchor="w")
         base_factor_names = _iter_factor_names("base")
         for row_index, factor_name in enumerate(base_factor_names):
-            var = tk.BooleanVar(value=True)
+            var = tk.BooleanVar(value=factor_name in default_base_factors)
             self.factor_vars[factor_name] = var
             factor_text = _make_label_text(factor_name)
             ttk.Checkbutton(factor_check_frame, text=factor_text, variable=var).grid(
@@ -569,6 +680,7 @@ class StrategyRunDialog:
         ttk.Button(alpha_frame, text="选择 Alpha158 因子...", command=self._open_alpha158_dialog).pack(side="left", padx=(10, 0))
         self.alpha158_summary_var = tk.StringVar(value=self._build_alpha158_summary())
         ttk.Label(alpha_frame, textvariable=self.alpha158_summary_var, foreground="#666666").pack(side="left", padx=(10, 0))
+        self._sync_alpha158_main_state()
 
         ttk.Label(container, text="Alpha101 因子").grid(row=5, column=0, sticky="nw", pady=(0, 12))
         alpha101_frame = ttk.Frame(container)
@@ -589,11 +701,33 @@ class StrategyRunDialog:
         ttk.Button(alpha101_frame, text="选择 Alpha101 因子...", command=self._open_alpha101_dialog).pack(side="left", padx=(10, 0))
         self.alpha101_summary_var = tk.StringVar(value=self._build_alpha101_summary())
         ttk.Label(alpha101_frame, textvariable=self.alpha101_summary_var, foreground="#666666").pack(side="left", padx=(10, 0))
+        self._sync_alpha101_main_state()
 
-        ttk.Label(container, text="因子缓存").grid(row=6, column=0, sticky="nw", pady=(0, 12))
+        ttk.Label(container, text="国君朝阳191 因子").grid(row=6, column=0, sticky="nw", pady=(0, 12))
+        alpha191_frame = ttk.Frame(container)
+        alpha191_frame.grid(row=6, column=1, sticky="w", pady=(0, 12))
+        self.alpha191_var = tk.IntVar(value=0)
+        self.alpha191_check = tk.Checkbutton(
+            alpha191_frame,
+            text="启用 国君朝阳191",
+            variable=self.alpha191_var,
+            onvalue=1,
+            offvalue=0,
+            tristatevalue=-1,
+            indicatoron=True,
+            selectcolor="#bfbfbf",
+            command=self._toggle_alpha191_from_main,
+        )
+        self.alpha191_check.pack(side="left")
+        ttk.Button(alpha191_frame, text="选择 国君朝阳191 因子...", command=self._open_alpha191_dialog).pack(side="left", padx=(10, 0))
+        self.alpha191_summary_var = tk.StringVar(value=self._build_alpha191_summary())
+        ttk.Label(alpha191_frame, textvariable=self.alpha191_summary_var, foreground="#666666").pack(side="left", padx=(10, 0))
+        self._sync_alpha191_main_state()
+
+        ttk.Label(container, text="因子缓存").grid(row=7, column=0, sticky="nw", pady=(0, 12))
         cache_frame = ttk.Frame(container)
-        cache_frame.grid(row=6, column=1, sticky="w", pady=(0, 12))
-        self.use_cache_var = tk.BooleanVar(value=False)
+        cache_frame.grid(row=7, column=1, sticky="w", pady=(0, 12))
+        self.use_cache_var = tk.BooleanVar(value=default_use_cache)
         ttk.Checkbutton(
             cache_frame,
             text="启用因子缓存（按日期范围复用，命中时跳过计算）",
@@ -603,10 +737,10 @@ class StrategyRunDialog:
         self.cache_status_var = tk.StringVar(value=self._build_cache_status_text())
         ttk.Label(cache_frame, textvariable=self.cache_status_var, foreground="#666666").pack(side="left", padx=(10, 0))
 
-        ttk.Label(container, text="运行到第几阶段").grid(row=7, column=0, sticky="nw")
-        self.max_stage_var = tk.IntVar(value=4)
+        ttk.Label(container, text="运行到第几阶段").grid(row=8, column=0, sticky="nw")
         stage_frame = ttk.Frame(container)
-        stage_frame.grid(row=7, column=1, sticky="w")
+        stage_frame.grid(row=8, column=1, sticky="w")
+        self.max_stage_var = tk.IntVar(value=default_max_stage)
         for stage, label in [
             (1, "阶段1：单因子评估"),
             (2, "阶段2：指标初筛"),
@@ -616,22 +750,21 @@ class StrategyRunDialog:
             ttk.Radiobutton(stage_frame, text=label, variable=self.max_stage_var, value=stage).pack(anchor="w", pady=1)
 
         ttk.Label(container, text="默认日期沿用当前策略原始范围，可直接修改。", foreground="#666666").grid(
-            row=8, column=0, columnspan=2, sticky="w", pady=(12, 4)
+            row=9, column=0, columnspan=2, sticky="w", pady=(12, 4)
         )
 
         self.message_var = tk.StringVar(value="")
-        ttk.Label(container, textvariable=self.message_var, foreground="#cc3333").grid(
-            row=9, column=0, columnspan=2, sticky="w", pady=(4, 10)
-        )
+        ttk.Label(container, textvariable=self.message_var, foreground="#cc3333").grid(row=10, column=0, columnspan=2, sticky="w", pady=(14, 8))
 
         button_frame = ttk.Frame(container)
-        button_frame.grid(row=10, column=0, columnspan=2, sticky="e")
+        button_frame.grid(row=11, column=0, columnspan=2, sticky="e")
         ttk.Button(button_frame, text="取消", command=self._cancel).pack(side="right", padx=(8, 0))
         ttk.Button(button_frame, text="开始运行", command=self._confirm).pack(side="right")
 
         container.columnconfigure(1, weight=1)
         self._sync_alpha158_main_state()
         self._sync_alpha101_main_state()
+        self._sync_alpha191_main_state()
         self.root.protocol("WM_DELETE_WINDOW", self._cancel)
 
     def _center_window(self, width: int, height: int) -> None:
@@ -724,6 +857,41 @@ class StrategyRunDialog:
         selected_count = len(self.selected_alpha101_factors)
         return f"已选择 {selected_count} / {total_count} 个因子"
 
+    def _set_alpha191_state(self, state: str) -> None:
+        """设置国君朝阳191主复选框状态。"""
+        if state == "all":
+            self.alpha191_var.set(1)
+        elif state == "partial":
+            self.alpha191_var.set(-1)
+        else:
+            self.alpha191_var.set(0)
+        self.alpha191_check.update_idletasks()
+
+    def _sync_alpha191_main_state(self) -> None:
+        """根据已选数量同步主界面国君朝阳191复选框状态。"""
+        total_count = len(_iter_factor_names("alpha191"))
+        selected_count = len(self.selected_alpha191_factors)
+        if selected_count <= 0:
+            self._set_alpha191_state("none")
+        elif selected_count >= total_count:
+            self._set_alpha191_state("all")
+        else:
+            self._set_alpha191_state("partial")
+        self.alpha191_summary_var.set(self._build_alpha191_summary())
+
+    def _toggle_alpha191_from_main(self) -> None:
+        """主界面切换国君朝阳191全选/全不选。"""
+        if self.alpha191_var.get() == 1:
+            self.selected_alpha191_factors = _iter_factor_names("alpha191")
+        else:
+            self.selected_alpha191_factors = []
+        self._sync_alpha191_main_state()
+
+    def _build_alpha191_summary(self) -> str:
+        total_count = len(_iter_factor_names("alpha191"))
+        selected_count = len(self.selected_alpha191_factors)
+        return f"已选择 {selected_count} / {total_count} 个因子"
+
     def _open_alpha158_dialog(self) -> None:
         dialog = Alpha158SelectionDialog(self.selected_alpha158_factors)
         selected = dialog.show()
@@ -739,6 +907,25 @@ class StrategyRunDialog:
             return
         self.selected_alpha101_factors = selected
         self._sync_alpha101_main_state()
+
+    def _open_alpha191_dialog(self) -> None:
+        dialog = Alpha191SelectionDialog(self.selected_alpha191_factors)
+        selected = dialog.show()
+        if selected is None:
+            return
+        self.selected_alpha191_factors = selected
+        self._sync_alpha191_main_state()
+
+    def _reset_dates_to_latest(self) -> None:
+        """把日期输入框重置为统一日期函数返回的最新范围。"""
+        latest_start, latest_end, _ = get_strategy_date_range()
+        self._latest_start = latest_start
+        self._latest_end = latest_end
+        self.start_entry.delete(0, tk.END)
+        self.start_entry.insert(0, latest_start)
+        self.end_entry.delete(0, tk.END)
+        self.end_entry.insert(0, latest_end)
+        self.date_hint_var.set(f"最新可用范围：{latest_start} ~ {latest_end}")
 
     def _build_cache_status_text(self) -> str:
         """统计当前缓存目录下的因子文件数量与体积。"""
@@ -796,7 +983,12 @@ class StrategyRunDialog:
             return
 
         selected_base_factors = [factor_name for factor_name, var in self.factor_vars.items() if var.get()]
-        selected_factors = selected_base_factors + self.selected_alpha158_factors + self.selected_alpha101_factors
+        selected_factors = (
+            selected_base_factors
+            + self.selected_alpha158_factors
+            + self.selected_alpha101_factors
+            + self.selected_alpha191_factors
+        )
         if not selected_factors:
             self.message_var.set("请至少选择一个因子")
             return
@@ -808,6 +1000,7 @@ class StrategyRunDialog:
             "selected_factors": selected_factors,
             "use_cache": bool(self.use_cache_var.get()),
         }
+        _save_last_run_config(self.result)
         self.root.destroy()
 
     def show(self) -> dict[str, object] | None:
@@ -845,17 +1038,64 @@ def _apply_factor_direction(score_df: pd.DataFrame, direction: int) -> pd.DataFr
     return score_df * -1
 
 
+def _compute_group_returns(
+    masked_factor_df: pd.DataFrame,
+    forward_returns_df: pd.DataFrame,
+    group_count: int = 5,
+) -> pd.DataFrame:
+    result_rows: list[pd.Series] = []
+    valid_dates = masked_factor_df.index.intersection(forward_returns_df.index)
+    labels = [f"G{i}" for i in range(1, group_count + 1)]
+
+    for dt in valid_dates:
+        merged = pd.concat(
+            [masked_factor_df.loc[dt], forward_returns_df.loc[dt]],
+            axis=1,
+            keys=["factor", "future_return"],
+        ).dropna()
+        if len(merged) < group_count:
+            continue
+
+        merged = merged.sort_values("factor", ascending=False).reset_index(drop=True)
+        merged["group"] = pd.qcut(merged.index + 1, q=group_count, labels=labels)
+        group_return = merged.groupby("group", observed=False)["future_return"].mean()
+        group_return.name = dt
+        result_rows.append(group_return)
+
+    if not result_rows:
+        return pd.DataFrame(columns=labels)
+    return pd.DataFrame(result_rows).reindex(columns=labels)
+
+
+def _calc_monotonicity_metric(masked_factor_df: pd.DataFrame, forward_returns_df: pd.DataFrame) -> float:
+    group_return_df = _compute_group_returns(masked_factor_df, forward_returns_df, group_count=5)
+    if group_return_df.empty:
+        return np.nan
+
+    avg_returns = group_return_df.mean().reindex(["G1", "G2", "G3", "G4", "G5"])
+    values = avg_returns.to_numpy(dtype=float)
+    diffs = np.diff(values)
+    valid_diffs = diffs[~np.isnan(diffs)]
+    if len(valid_diffs) == 0:
+        return np.nan
+
+    decreasing_score = float((valid_diffs < 0).sum() / len(valid_diffs))
+    increasing_score = float((valid_diffs > 0).sum() / len(valid_diffs))
+    return max(decreasing_score, increasing_score)
+
+
 def _build_candidate_status(candidate_metrics_df: pd.DataFrame) -> pd.DataFrame:
     """根据候选因子指标总表，生成“阶段一：初筛状态表”。"""
     rows: list[dict[str, object]] = []
     for _, row in candidate_metrics_df.iterrows():
         direction = _infer_factor_direction(row)
+        directional_rr_mean = row["RR均值"] * direction if pd.notna(row["RR均值"]) else row["RR均值"]
         metric_checks = {
             "IC均值通过": _passes_threshold(row["IC均值"], config.MIN_IC_MEAN, use_abs=True),
             "ICIR通过": _passes_threshold(row["ICIR"], config.MIN_ICIR, use_abs=True),
             "RankIC均值通过": _passes_threshold(row["RankIC均值"], config.MIN_RANK_IC_MEAN, use_abs=True),
             "RankICIR通过": _passes_threshold(row["RankICIR"], config.MIN_RANK_ICIR, use_abs=True),
-            "RR均值通过": _passes_threshold(row["RR均值"], config.MIN_RR_MEAN),
+            "RR均值通过": _passes_threshold(directional_rr_mean, config.MIN_RR_MEAN),
             "RR胜率通过": _passes_threshold(row["RR胜率"], config.MIN_RR_WIN_RATE),
         }
         rows.append(
@@ -1168,6 +1408,7 @@ def run_strategy(
             rr_series=rr_series,
             periods_per_year=config.IC_PERIODS_PER_YEAR,
         )
+        summary_df["单调性指标"] = _calc_monotonicity_metric(masked_factor_df, forward_returns_df)
 
         single_factor_results = run_single_factor_backtest(
             factor_df=raw_factor_df,
@@ -1176,6 +1417,7 @@ def run_strategy(
             rebalance_mask=rebalance_mask,
             benchmark_close=benchmark_close,
             hold_num=config.HOLD_NUM,
+            factor_ascending=FACTOR_DIRECTIONS.get(factor_name, False),
         )
 
         factor_analysis[factor_name] = {
