@@ -185,25 +185,37 @@ def load_benchmark_close(
     返回：
         以日期字符串为索引的收盘价序列；若读取失败则返回空序列。
     """
-    try:
-        benchmark_df = getDayData(
-            stock_code=benchmark_code,
-            start_date=start_date,
-            end_date=end_date,
-            is_download=need_download,
-            dividend_type=dividend_type,
-        )
-    except Exception:
-        return pd.Series(dtype=float, name=config.BENCHMARK_NAME)
+    candidate_codes = [benchmark_code]
+    for fallback_code in ["932000.SH", "932000.CSI", "000852.SH", "000905.SH"]:
+        if fallback_code not in candidate_codes:
+            candidate_codes.append(fallback_code)
 
-    if not isinstance(benchmark_df, pd.DataFrame) or benchmark_df.empty or "close" not in benchmark_df.columns:
+    benchmark_df = pd.DataFrame()
+    used_code = benchmark_code
+    for candidate_code in candidate_codes:
+        try:
+            current_df = getDayData(
+                stock_code=candidate_code,
+                start_date=start_date,
+                end_date=end_date,
+                is_download=need_download,
+                dividend_type=dividend_type,
+            )
+        except Exception:
+            continue
+        if isinstance(current_df, pd.DataFrame) and not current_df.empty and "close" in current_df.columns:
+            benchmark_df = current_df
+            used_code = candidate_code
+            break
+
+    if benchmark_df.empty or "close" not in benchmark_df.columns:
         return pd.Series(dtype=float, name=config.BENCHMARK_NAME)
 
     benchmark_close = benchmark_df[["date", "close"]].copy()
     benchmark_close["date"] = benchmark_close["date"].astype(str)
     benchmark_close["close"] = pd.to_numeric(benchmark_close["close"], errors="coerce")
     benchmark_close = benchmark_close.drop_duplicates(subset=["date"]).set_index("date")["close"]
-    benchmark_close.name = config.BENCHMARK_NAME
+    benchmark_close.name = config.BENCHMARK_NAME if used_code == benchmark_code else f"{config.BENCHMARK_NAME}({used_code})"
     return benchmark_close
 
 

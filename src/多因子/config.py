@@ -71,8 +71,8 @@ FACTOR_CORR_THRESHOLD = 0.8
 
 # ==================== 基准配置 ====================
 # 回测基准改为中证 2000。
-# 这里优先使用中证 2000 指数常用代码 `932000.CSI`。
-BENCHMARK_CODE = "932000.CSI"
+# 这里使用当前 getDayData / xtquant 数据源可读取的中证 2000 代码。
+BENCHMARK_CODE = "932000.SH"
 BENCHMARK_NAME = "中证2000"
 
 # ==================== 组合参数 ====================
@@ -80,7 +80,7 @@ BENCHMARK_NAME = "中证2000"
 REBALANCE_FREQ = "W-FRI"
 
 # 每期持有股票数量。
-HOLD_NUM = 20
+HOLD_NUM = 260
 
 # 交易费用参数。
 # 按你的最新要求，手续费暂时设为 0。

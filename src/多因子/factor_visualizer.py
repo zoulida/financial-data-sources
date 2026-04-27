@@ -624,6 +624,7 @@ def visualize_factor(
         rebalance_mask=rebalance_mask,
         benchmark_close=benchmark_close,
         hold_num=config.HOLD_NUM,
+        factor_ascending=ascending,
     )
 
     group_return_df = _compute_group_returns(masked_factor_df, forward_returns_df, group_count=5)
@@ -655,13 +656,34 @@ def visualize_factor(
     if "single_factor_equity_vs_benchmark" in selected_charts and isinstance(equity_curve, pd.Series):
         plt.figure(figsize=(12, 6))
         equity_curve.plot(label=f"{factor_label} 单因子净值", linewidth=2)
-        if isinstance(benchmark_close, pd.Series) and not benchmark_close.empty:
+        result_benchmark_close = backtest_results.get("benchmark_close")
+        if isinstance(result_benchmark_close, pd.Series) and not result_benchmark_close.empty:
+            benchmark_curve = result_benchmark_close.copy()
+        elif isinstance(benchmark_close, pd.Series) and not benchmark_close.empty:
             benchmark_curve = benchmark_close.copy()
+        else:
+            benchmark_curve = pd.Series(dtype=float)
+
+        if not benchmark_curve.empty:
             benchmark_curve.index = pd.to_datetime(benchmark_curve.index.astype(str))
             benchmark_curve = benchmark_curve.reindex(equity_curve.index).ffill()
-            if len(benchmark_curve) > 0 and pd.notna(benchmark_curve.iloc[0]) and benchmark_curve.iloc[0] != 0:
-                benchmark_curve = benchmark_curve / benchmark_curve.iloc[0] * equity_curve.iloc[0]
+            benchmark_curve = benchmark_curve.dropna()
+            if not benchmark_curve.empty and pd.notna(benchmark_curve.iloc[0]) and benchmark_curve.iloc[0] != 0:
+                aligned_equity = equity_curve.reindex(benchmark_curve.index).dropna()
+                if not aligned_equity.empty:
+                    benchmark_curve = benchmark_curve / benchmark_curve.iloc[0] * aligned_equity.iloc[0]
+                    benchmark_curve = benchmark_curve.reindex(equity_curve.index).ffill()
+                else:
+                    benchmark_curve = benchmark_curve / benchmark_curve.iloc[0] * equity_curve.iloc[0]
+                benchmark_curve.to_frame(name=config.BENCHMARK_NAME).to_csv(
+                    output_dir / "benchmark_curve_aligned.csv",
+                    encoding="utf-8-sig",
+                )
                 benchmark_curve.plot(label=config.BENCHMARK_NAME, linestyle="--")
+            else:
+                print(f"基准曲线为空或首值无效，跳过绘制：{config.BENCHMARK_NAME}")
+        else:
+            print(f"未获取到基准数据，跳过绘制：{config.BENCHMARK_NAME}")
         plt.title(f"{factor_label} 单因子净值 vs 基准")
         plt.xlabel("日期")
         plt.ylabel("净值")
