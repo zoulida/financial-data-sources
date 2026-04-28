@@ -1,2 +1,2 @@
-﻿factor,方向,IC均值通过,ICIR通过,RankIC均值通过,RankICIR通过,RR均值通过,RR胜率通过,初筛是否通过,备注
-alpha158.amount_mean_20_ratio,-1,True,True,True,True,True,False,True,当前阈值导致无因子通过，已回退为保留全部候选因子
+﻿factor,is_factor_higher_better,推断方向,IC均值通过,ICIR通过,RankIC均值通过,RankICIR通过,RR均值通过,RR胜率通过,初筛是否通过,备注
+alpha158.amount_mean_20_ratio,False,因子小→好(is_factor_higher_better=False),True,True,True,True,True,False,True,当前阈值导致无因子通过，已回退为保留全部候选因子

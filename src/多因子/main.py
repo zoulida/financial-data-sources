@@ -41,12 +41,12 @@ from src.多因子.universe import build_tradable_mask
 
 
 # 因子方向定义：
-# False 表示“因子值越大越好”，横截面排名时按降序打分；
-# True 表示“因子值越小越好”，横截面排名时按升序打分。
+# True 表示“因子值越大越好”；
+# False 表示“因子值越小越好”。
 # 当前默认均按“越大越好”处理，如个别因子需要反向，可在此单独覆盖。
-BASE_FACTOR_DIRECTIONS = {
-    "momentum_20": False,
-    "risk_adjusted_momentum_20": False,
+BASE_FACTOR_HIGHER_BETTER = {
+    "momentum_20": True,
+    "risk_adjusted_momentum_20": True,
 }
 
 BASE_FACTOR_LABELS = {
@@ -159,7 +159,7 @@ def _discover_alpha158_factors() -> dict[str, dict[str, object]]:
             "function": f"compute_{factor_name}",
             "args": list(spec["args"]),
             "label": str(spec["label"]),
-            "ascending": False,
+            "is_factor_higher_better": True,
             "group": "alpha158",
         }
     return discovered
@@ -234,7 +234,7 @@ def _discover_alpha101_factors() -> dict[str, dict[str, object]]:
             "function": function_name,
             "args": list(spec["args"]),
             "label": str(spec["label"]),
-            "ascending": False,
+            "is_factor_higher_better": True,
             "group": "alpha101",
         }
     return discovered
@@ -265,7 +265,7 @@ def _discover_alpha191_factors() -> dict[str, dict[str, object]]:
             "function": function_name,
             "args": inferred_args,
             "label": f"国君朝阳191 #{factor_name.removeprefix('alpha')}",
-            "ascending": False,
+            "is_factor_higher_better": True,
             "group": "alpha191",
         }
     return discovered
@@ -275,13 +275,13 @@ FACTOR_REGISTRY: dict[str, dict[str, object]] = {
     "momentum_20": {
         "kind": "builtin",
         "label": BASE_FACTOR_LABELS["momentum_20"],
-        "ascending": BASE_FACTOR_DIRECTIONS["momentum_20"],
+        "is_factor_higher_better": BASE_FACTOR_HIGHER_BETTER["momentum_20"],
         "group": "base",
     },
     "risk_adjusted_momentum_20": {
         "kind": "builtin",
         "label": BASE_FACTOR_LABELS["risk_adjusted_momentum_20"],
-        "ascending": BASE_FACTOR_DIRECTIONS["risk_adjusted_momentum_20"],
+        "is_factor_higher_better": BASE_FACTOR_HIGHER_BETTER["risk_adjusted_momentum_20"],
         "group": "base",
     },
 }
@@ -289,11 +289,22 @@ FACTOR_REGISTRY.update(_discover_alpha158_factors())
 FACTOR_REGISTRY.update(_discover_alpha101_factors())
 FACTOR_REGISTRY.update(_discover_alpha191_factors())
 
-FACTOR_DIRECTIONS = {name: bool(spec["ascending"]) for name, spec in FACTOR_REGISTRY.items()}
+FACTOR_HIGHER_BETTER = {name: bool(spec.get("is_factor_higher_better", not bool(spec.get("ascending", False)))) for name, spec in FACTOR_REGISTRY.items()}
+FACTOR_DIRECTIONS = {name: not is_factor_higher_better for name, is_factor_higher_better in FACTOR_HIGHER_BETTER.items()}
 FACTOR_LABELS = {name: str(spec["label"]) for name, spec in FACTOR_REGISTRY.items()}
 
 
 FACTOR_CACHE_DIR = Path(__file__).resolve().parent / "factor_cache"
+
+
+def _rank_score_by_factor_direction(factor_df: pd.DataFrame, is_factor_higher_better: bool) -> pd.DataFrame:
+    """按“因子值高低是否更好”的语义生成分数。"""
+    return rank_score(factor_df, ascending=is_factor_higher_better)
+
+
+def _factor_direction_label(is_factor_higher_better: bool) -> str:
+    """生成阶段输出中使用的因子方向说明。"""
+    return "因子大→好(is_factor_higher_better=True)" if is_factor_higher_better else "因子小→好(is_factor_higher_better=False)"
 
 
 def _factor_cache_path(factor_name: str, start_date: str, end_date: str) -> Path:
@@ -1018,17 +1029,36 @@ def _passes_threshold(value: float, threshold: float | None, *, use_abs: bool = 
     return bool(metric_value >= threshold)
 
 
-def _infer_factor_direction(row: pd.Series) -> int:
-    """根据候选因子指标推断后续组合使用方向。"""
+def _infer_is_factor_higher_better(row: pd.Series) -> bool:
+    """根据候选因子指标推断是否“因子值越大越好”。
+
+    选方向的优先级（从强到弱）：
+    1. 分组端组平均未来收益（G1=因子最大组，G5=因子最小组）：
+       - 哪一端的平均收益更高，就把方向对齐到那一端；
+       - 这是与"分组单调性最优方向"完全一致的判定，避免出现
+         "RankIC符号 与 端组实际更赚的那头" 不一致的情况。
+    2. RankIC 均值的符号（兜底）。
+    3. IC 均值的符号（再兜底）。
+    4. 默认 True。
+
+    返回值：
+    - True 表示"因子值越大越好"；
+    - False 表示"因子值越小越好"。
+    """
+    g1_mean = row.get("G1平均收益")
+    g5_mean = row.get("G5平均收益")
+    if pd.notna(g1_mean) and pd.notna(g5_mean) and float(g1_mean) != float(g5_mean):
+        return float(g1_mean) > float(g5_mean)
+
     rank_ic_mean = row.get("RankIC均值")
     if pd.notna(rank_ic_mean) and float(rank_ic_mean) != 0.0:
-        return 1 if float(rank_ic_mean) > 0 else -1
+        return float(rank_ic_mean) > 0
 
     ic_mean = row.get("IC均值")
     if pd.notna(ic_mean) and float(ic_mean) != 0.0:
-        return 1 if float(ic_mean) > 0 else -1
+        return float(ic_mean) > 0
 
-    return 1
+    return True
 
 
 def _apply_factor_direction(score_df: pd.DataFrame, direction: int) -> pd.DataFrame:
@@ -1088,8 +1118,9 @@ def _build_candidate_status(candidate_metrics_df: pd.DataFrame) -> pd.DataFrame:
     """根据候选因子指标总表，生成“阶段一：初筛状态表”。"""
     rows: list[dict[str, object]] = []
     for _, row in candidate_metrics_df.iterrows():
-        direction = _infer_factor_direction(row)
-        directional_rr_mean = row["RR均值"] * direction if pd.notna(row["RR均值"]) else row["RR均值"]
+        is_factor_higher_better = _infer_is_factor_higher_better(row)
+        direction_sign = 1 if is_factor_higher_better else -1
+        directional_rr_mean = row["RR均值"] * direction_sign if pd.notna(row["RR均值"]) else row["RR均值"]
         metric_checks = {
             "IC均值通过": _passes_threshold(row["IC均值"], config.MIN_IC_MEAN, use_abs=True),
             "ICIR通过": _passes_threshold(row["ICIR"], config.MIN_ICIR, use_abs=True),
@@ -1101,7 +1132,8 @@ def _build_candidate_status(candidate_metrics_df: pd.DataFrame) -> pd.DataFrame:
         rows.append(
             {
                 "factor": row["factor"],
-                "方向": direction,
+                "is_factor_higher_better": is_factor_higher_better,
+                "推断方向": _factor_direction_label(is_factor_higher_better),
                 **metric_checks,
                 "初筛是否通过": all(metric_checks.values()),
             }
@@ -1175,11 +1207,18 @@ def _deduplicate_by_correlation(
 
     final_rows = []
     for factor_name in screened_metrics_df["factor"].tolist():
+        if "is_factor_higher_better" in screened_metrics_df.columns:
+            factor_row = screened_metrics_df.loc[screened_metrics_df["factor"] == factor_name]
+            is_factor_higher_better = bool(factor_row["is_factor_higher_better"].iloc[0]) if not factor_row.empty else True
+        else:
+            is_factor_higher_better = True
         final_rows.append(
             {
                 "factor": factor_name,
                 "是否入选最终组合": factor_name in selected,
                 "组合权重": 1.0 / len(selected) if factor_name in selected and selected else 0.0,
+                "阶段4方向": _factor_direction_label(is_factor_higher_better),
+                "is_factor_higher_better": is_factor_higher_better,
             }
         )
     return selected, corr_matrix, corr_pairs_df, pd.DataFrame(final_rows)
@@ -1396,7 +1435,8 @@ def run_strategy(
             len(raw_factor_dict),
         )
         masked_factor_df = mask_factor(raw_factor_df, tradable_mask)
-        factor_score_df = rank_score(masked_factor_df, ascending=FACTOR_DIRECTIONS.get(factor_name, False))
+        is_factor_higher_better = bool(FACTOR_HIGHER_BETTER.get(factor_name, True))
+        factor_score_df = _rank_score_by_factor_direction(masked_factor_df, is_factor_higher_better)
 
         ic_series = calc_ic_series(masked_factor_df, forward_returns_df)
         rank_ic_series = calc_rank_ic_series(masked_factor_df, forward_returns_df)
@@ -1409,6 +1449,15 @@ def run_strategy(
             periods_per_year=config.IC_PERIODS_PER_YEAR,
         )
         summary_df["单调性指标"] = _calc_monotonicity_metric(masked_factor_df, forward_returns_df)
+        # 额外计算分组端组（G1=因子最大组，G5=因子最小组）的平均未来收益，
+        # 供 _infer_is_factor_higher_better 选择"分组单调收益更高的那一端"作为最终方向。
+        group_return_df_for_dir = _compute_group_returns(masked_factor_df, forward_returns_df, group_count=5)
+        if not group_return_df_for_dir.empty:
+            summary_df["G1平均收益"] = float(group_return_df_for_dir["G1"].mean())
+            summary_df["G5平均收益"] = float(group_return_df_for_dir["G5"].mean())
+        else:
+            summary_df["G1平均收益"] = np.nan
+            summary_df["G5平均收益"] = np.nan
 
         single_factor_results = run_single_factor_backtest(
             factor_df=raw_factor_df,
@@ -1417,7 +1466,7 @@ def run_strategy(
             rebalance_mask=rebalance_mask,
             benchmark_close=benchmark_close,
             hold_num=config.HOLD_NUM,
-            factor_ascending=FACTOR_DIRECTIONS.get(factor_name, False),
+            factor_ascending=is_factor_higher_better,
         )
 
         factor_analysis[factor_name] = {
@@ -1487,16 +1536,21 @@ def run_strategy(
         candidate_status_df["备注"] = "当前阈值导致无因子通过，已回退为保留全部候选因子"
         screened_factors = candidate_status_df["factor"].tolist()
 
-    factor_directions = {
-        row["factor"]: int(row["方向"])
+    inferred_factor_higher_better = {
+        row["factor"]: bool(row["is_factor_higher_better"])
         for _, row in candidate_status_df.iterrows()
     }
+    # 阶段4直接按阶段2推断出的 is_factor_higher_better 重新生成分数。
     adjusted_factor_scores = {
-        factor_name: _apply_factor_direction(candidate_factor_scores[factor_name], factor_directions.get(factor_name, 1))
+        factor_name: _rank_score_by_factor_direction(
+            factor_analysis[factor_name]["masked_factor_df"],
+            bool(inferred_factor_higher_better.get(factor_name, True)),
+        )
         for factor_name in screened_factors
     }
     screened_metrics_df = candidate_metrics_df[candidate_metrics_df["factor"].isin(screened_factors)].reset_index(drop=True)
-    screened_metrics_df["方向"] = screened_metrics_df["factor"].map(factor_directions).fillna(1).astype(int)
+    screened_metrics_df["is_factor_higher_better"] = screened_metrics_df["factor"].map(inferred_factor_higher_better).fillna(True).astype(bool)
+    screened_metrics_df["阶段4方向"] = screened_metrics_df["is_factor_higher_better"].map(_factor_direction_label)
 
     _print_stage_table("阶段2结果：初筛状态表", candidate_status_df)
     _print_stage_table("阶段2结果：进入相关性分析的因子", screened_metrics_df)

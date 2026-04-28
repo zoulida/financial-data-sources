@@ -1,2 +1,2 @@
-﻿factor,是否入选最终组合,组合权重
-alpha158.amount_mean_20_ratio,True,1.0
+﻿factor,是否入选最终组合,组合权重,阶段4方向,is_factor_higher_better
+alpha158.amount_mean_20_ratio,True,1.0,因子小→好(is_factor_higher_better=False),False
