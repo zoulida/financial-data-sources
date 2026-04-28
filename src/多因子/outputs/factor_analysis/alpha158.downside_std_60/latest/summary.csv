@@ -1,2 +1,2 @@
-﻿factor,IC均值,ICIR,RankIC均值,RankICIR,RR均值,RR胜率
-alpha158.downside_std_60,,,,,,
+﻿factor,IC均值,ICIR,RankIC均值,RankICIR,RR均值,RR胜率,单调性指标,G1平均收益,G5平均收益
+alpha158.downside_std_60,,,,,,,,,

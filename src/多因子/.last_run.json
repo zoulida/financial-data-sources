@@ -3,7 +3,10 @@
   "end_date": "20260424",
   "max_stage": 4,
   "selected_factors": [
-    "alpha158.amount_mean_20_ratio"
+    "momentum_20",
+    "risk_adjusted_momentum_20"
   ],
-  "use_cache": true
+  "use_cache": true,
+  "use_batch_data_cache": true,
+  "save_single_factor_results": false
 }

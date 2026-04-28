@@ -52,7 +52,25 @@ FACTOR_WEIGHTS = {
 # ==================== 因子评估参数 ====================
 # IR 年化时默认按周频近似折算。
 IC_PERIODS_PER_YEAR = 52
-
+'''# ==================== 因子筛选参数 ====================
+# 单因子指标初筛阈值：
+# - IC均值 / RankIC均值 / RR均值默认不设硬阈值；
+# - ICIR / RankICIR 默认要求非负；
+# - RR胜率默认至少 50%。
+MIN_IC_MEAN = None
+MIN_ICIR = 0.0
+MIN_RANK_IC_MEAN = None
+MIN_RANK_ICIR = 0.0
+MIN_RR_MEAN = None
+MIN_RR_WIN_RATE = 0.5'''
+# ==================== 因子筛选参数（推荐 稳健版）====================
+# 单因子指标初筛阈值
+# MIN_IC_MEAN = 0.02          # IC均值 > 0.02（有效因子门槛）
+# MIN_ICIR = 0.2              # ICIR > 0.2（信息系数稳健性）
+# MIN_RANK_IC_MEAN = 0.02     # RankIC均值 > 0.02
+# MIN_RANK_ICIR = 0.3         # RankICIR > 0.3（比ICIR更严格，更可靠）
+# MIN_RR_MEAN = 1.0           # 平均盈亏比 ≥1.0（打平线）
+# MIN_RR_WIN_RATE = 0.55      # RR胜率 ≥55%（比50%更严格，过滤噪音）
 # ==================== 因子筛选参数 ====================
 # 单因子指标初筛阈值：
 # - IC均值 / RankIC均值 / RR均值默认不设硬阈值；
@@ -63,7 +81,8 @@ MIN_ICIR = 0.0
 MIN_RANK_IC_MEAN = None
 MIN_RANK_ICIR = 0.0
 MIN_RR_MEAN = None
-MIN_RR_WIN_RATE = 0.5
+MIN_RR_WIN_RATE = 0.5      # RR胜率 ≥55%（比50%更严格，过滤噪音）
+MIN_MONOTONICITY = 1.0      # 分组单调性指标 = 1（5 组完全严格单调）
 
 # 因子相关性去冗余阈值。
 # 若两个因子横截面分数相关系数绝对值大于该阈值，则淘汰综合表现较差者。

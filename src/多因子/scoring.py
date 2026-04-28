@@ -20,7 +20,7 @@ def mask_factor(factor_df: pd.DataFrame, tradable_mask: pd.DataFrame) -> pd.Data
         return factor_df.copy()
 
     factor_df = factor_df.apply(pd.to_numeric, errors="coerce").replace([np.inf, -np.inf], np.nan)
-    aligned_mask = tradable_mask.reindex_like(factor_df).fillna(False)
+    aligned_mask = tradable_mask.reindex_like(factor_df).astype("boolean").fillna(False).astype(bool)
     return factor_df.where(aligned_mask)
 
 

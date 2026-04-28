@@ -6,8 +6,15 @@ import json
 import sys
 import threading
 import time
+import warnings
 from collections.abc import Callable
 from pathlib import Path
+
+warnings.filterwarnings(
+    "ignore",
+    message=r"pkg_resources is deprecated as an API.*",
+    category=UserWarning,
+)
 
 import tkinter as tk
 from tkinter import messagebox, ttk
@@ -22,7 +29,12 @@ from src.多因子.backtest_vectorbt import (
     extract_backtest_results,
     run_vectorbt_backtest,
 )
-from src.多因子.data_loader import build_data_bundle, get_strategy_date_range
+from src.多因子.data_loader import (
+    build_data_bundle,
+    clear_batch_data_cache,
+    get_strategy_date_range,
+    list_batch_data_cache_files,
+)
 from src.多因子.factor_evaluation import (
     build_forward_returns,
     calc_ic_series,
@@ -616,11 +628,13 @@ class StrategyRunDialog:
         last_max_stage = last_run_config.get("max_stage")
         default_max_stage = last_max_stage if isinstance(last_max_stage, int) and 1 <= last_max_stage <= 4 else 4
         default_use_cache = bool(last_run_config.get("use_cache", False))
+        default_use_batch_data_cache = bool(last_run_config.get("use_batch_data_cache", False))
+        default_save_single_factor = bool(last_run_config.get("save_single_factor_results", True))
 
         self.root = tk.Tk()
         self.root.title("多因子运行参数")
         self.root.resizable(False, False)
-        self._center_window(760, 620)
+        self._center_window(820, 680)
 
         container = ttk.Frame(self.root, padding=16)
         container.pack(fill="both", expand=True)
@@ -748,9 +762,32 @@ class StrategyRunDialog:
         self.cache_status_var = tk.StringVar(value=self._build_cache_status_text())
         ttk.Label(cache_frame, textvariable=self.cache_status_var, foreground="#666666").pack(side="left", padx=(10, 0))
 
-        ttk.Label(container, text="运行到第几阶段").grid(row=8, column=0, sticky="nw")
+        ttk.Label(container, text="批量数据缓存").grid(row=8, column=0, sticky="nw", pady=(0, 12))
+        batch_cache_frame = ttk.Frame(container)
+        batch_cache_frame.grid(row=8, column=1, sticky="w", pady=(0, 12))
+        self.use_batch_data_cache_var = tk.BooleanVar(value=default_use_batch_data_cache)
+        ttk.Checkbutton(
+            batch_cache_frame,
+            text="使用缓存数据回测（命中则不下载；未命中则下载后缓存）",
+            variable=self.use_batch_data_cache_var,
+        ).pack(side="left")
+        ttk.Button(batch_cache_frame, text="清除批量数据缓存", command=self._clear_batch_data_cache).pack(side="left", padx=(10, 0))
+        self.batch_data_cache_status_var = tk.StringVar(value=self._build_batch_data_cache_status_text())
+        ttk.Label(batch_cache_frame, textvariable=self.batch_data_cache_status_var, foreground="#666666").pack(side="left", padx=(10, 0))
+
+        ttk.Label(container, text="单因子分析结果").grid(row=9, column=0, sticky="nw", pady=(0, 12))
+        save_sf_frame = ttk.Frame(container)
+        save_sf_frame.grid(row=9, column=1, sticky="w", pady=(0, 12))
+        self.save_single_factor_var = tk.BooleanVar(value=default_save_single_factor)
+        ttk.Checkbutton(
+            save_sf_frame,
+            text="保存单因子分析结果（summary/IC时序/单因子统计 CSV，未勾选则跳过以节省时间）",
+            variable=self.save_single_factor_var,
+        ).pack(side="left")
+
+        ttk.Label(container, text="运行到第几阶段").grid(row=10, column=0, sticky="nw")
         stage_frame = ttk.Frame(container)
-        stage_frame.grid(row=8, column=1, sticky="w")
+        stage_frame.grid(row=10, column=1, sticky="w")
         self.max_stage_var = tk.IntVar(value=default_max_stage)
         for stage, label in [
             (1, "阶段1：单因子评估"),
@@ -761,14 +798,14 @@ class StrategyRunDialog:
             ttk.Radiobutton(stage_frame, text=label, variable=self.max_stage_var, value=stage).pack(anchor="w", pady=1)
 
         ttk.Label(container, text="默认日期沿用当前策略原始范围，可直接修改。", foreground="#666666").grid(
-            row=9, column=0, columnspan=2, sticky="w", pady=(12, 4)
+            row=11, column=0, columnspan=2, sticky="w", pady=(12, 4)
         )
 
         self.message_var = tk.StringVar(value="")
-        ttk.Label(container, textvariable=self.message_var, foreground="#cc3333").grid(row=10, column=0, columnspan=2, sticky="w", pady=(14, 8))
+        ttk.Label(container, textvariable=self.message_var, foreground="#cc3333").grid(row=12, column=0, columnspan=2, sticky="w", pady=(14, 8))
 
         button_frame = ttk.Frame(container)
-        button_frame.grid(row=11, column=0, columnspan=2, sticky="e")
+        button_frame.grid(row=13, column=0, columnspan=2, sticky="e")
         ttk.Button(button_frame, text="取消", command=self._cancel).pack(side="right", padx=(8, 0))
         ttk.Button(button_frame, text="开始运行", command=self._confirm).pack(side="right")
 
@@ -976,6 +1013,41 @@ class StrategyRunDialog:
         else:
             messagebox.showinfo("清除因子缓存", f"已删除 {deleted} 个缓存文件。", parent=self.root)
 
+    def _build_batch_data_cache_status_text(self) -> str:
+        files = list_batch_data_cache_files()
+        if not files:
+            return "当前缓存：0 个文件"
+        total_bytes = sum(f.stat().st_size for f in files if f.exists())
+        size_mb = total_bytes / (1024 * 1024)
+        return f"当前缓存：{len(files)} 个文件，约 {size_mb:.1f} MB"
+
+    def _refresh_batch_data_cache_status(self) -> None:
+        self.batch_data_cache_status_var.set(self._build_batch_data_cache_status_text())
+
+    def _clear_batch_data_cache(self) -> None:
+        files = list_batch_data_cache_files()
+        if not files:
+            messagebox.showinfo("清除批量数据缓存", "当前没有批量数据缓存文件。", parent=self.root)
+            self._refresh_batch_data_cache_status()
+            return
+        confirmed = messagebox.askyesno(
+            "清除批量数据缓存",
+            f"将删除 {len(files)} 个批量数据缓存文件，操作不可恢复，是否继续？",
+            parent=self.root,
+        )
+        if not confirmed:
+            return
+        deleted, failures = clear_batch_data_cache()
+        self._refresh_batch_data_cache_status()
+        if failures:
+            messagebox.showwarning(
+                "清除批量数据缓存",
+                f"已删除 {deleted} 个文件，{len(failures)} 个失败：\n" + "\n".join(failures),
+                parent=self.root,
+            )
+        else:
+            messagebox.showinfo("清除批量数据缓存", f"已删除 {deleted} 个缓存文件。", parent=self.root)
+
     def _cancel(self) -> None:
         self.result = None
         self.root.destroy()
@@ -1010,6 +1082,8 @@ class StrategyRunDialog:
             "max_stage": int(self.max_stage_var.get()),
             "selected_factors": selected_factors,
             "use_cache": bool(self.use_cache_var.get()),
+            "use_batch_data_cache": bool(self.use_batch_data_cache_var.get()),
+            "save_single_factor_results": bool(self.save_single_factor_var.get()),
         }
         _save_last_run_config(self.result)
         self.root.destroy()
@@ -1128,6 +1202,7 @@ def _build_candidate_status(candidate_metrics_df: pd.DataFrame) -> pd.DataFrame:
             "RankICIR通过": _passes_threshold(row["RankICIR"], config.MIN_RANK_ICIR, use_abs=True),
             "RR均值通过": _passes_threshold(directional_rr_mean, config.MIN_RR_MEAN),
             "RR胜率通过": _passes_threshold(row["RR胜率"], config.MIN_RR_WIN_RATE),
+            "单调性通过": _passes_threshold(row.get("单调性指标"), getattr(config, "MIN_MONOTONICITY", None)),
         }
         rows.append(
             {
@@ -1247,6 +1322,94 @@ def _print_factor_evaluation(factor_name: str, summary_df: pd.DataFrame) -> None
     _print_separator("-", 90)
 
 
+def _print_backtest_metrics(
+    title: str,
+    stats: object,
+    period_days: float | None = None,
+    returns: pd.Series | None = None,
+    benchmark_returns: pd.Series | None = None,
+    periods_per_year: int = 252,
+) -> None:
+    """按 single_factor_stats.csv 的统计量打印组合/因子的核心评价指标。
+
+    输出：总收益率、基准收益率、超额收益、年化收益、超额年化、波动率、夏普比率、最大回撤。
+    其中 超额年化 / 波动率 需要传入 returns 序列（以及可选的基准收益率序列）。
+    """
+    if stats is None or not hasattr(stats, "loc"):
+        print(f"[{title}] 无可用统计数据")
+        return
+
+    def _get(key: str) -> float:
+        try:
+            value = stats.loc[key]
+        except Exception:
+            return float("nan")
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return float("nan")
+
+    total_return = _get("Total Return [%]")
+    benchmark_return = _get("Benchmark Return [%]")
+    sharpe = _get("Sharpe Ratio")
+    max_dd = _get("Max Drawdown [%]")
+
+    # 年化收益：根据 stats 中的 Period（Timedelta）或外部传入天数计算。
+    annualized = float("nan")
+    days: float | None = period_days
+    if days is None:
+        try:
+            period_value = stats.loc["Period"] if "Period" in stats.index else None
+        except Exception:
+            period_value = None
+        if isinstance(period_value, pd.Timedelta):
+            days = float(period_value.days) + period_value.seconds / 86400.0
+    if days is not None and days > 0 and not np.isnan(total_return):
+        years = days / 365.25
+        if years > 0:
+            annualized = ((1.0 + total_return / 100.0) ** (1.0 / years) - 1.0) * 100.0
+
+    excess = float("nan")
+    if not np.isnan(total_return) and not np.isnan(benchmark_return):
+        excess = total_return - benchmark_return
+
+    # 基准年化（用于超额年化）
+    benchmark_annualized = float("nan")
+    if days is not None and days > 0 and not np.isnan(benchmark_return):
+        years = days / 365.25
+        if years > 0:
+            benchmark_annualized = ((1.0 + benchmark_return / 100.0) ** (1.0 / years) - 1.0) * 100.0
+
+    excess_annualized = float("nan")
+    if not np.isnan(annualized) and not np.isnan(benchmark_annualized):
+        excess_annualized = annualized - benchmark_annualized
+
+    # 年化波动率：基于日收益率序列。
+    volatility = float("nan")
+    if isinstance(returns, pd.Series) and not returns.empty:
+        ret_clean = returns.dropna()
+        if len(ret_clean) > 1:
+            volatility = float(ret_clean.std(ddof=1) * np.sqrt(periods_per_year) * 100.0)
+
+    def _fmt(x: float, suffix: str = "%") -> str:
+        if x is None or (isinstance(x, float) and np.isnan(x)):
+            return "N/A"
+        return f"{x:.6f}{suffix}"
+
+    _print_separator("-", 90)
+    print(f"[{title}]")
+    _print_separator("-", 90)
+    print(f"  总收益率   ：{_fmt(total_return)}")
+    print(f"  基准收益率 ：{_fmt(benchmark_return)}")
+    print(f"  超额收益   ：{_fmt(excess)}")
+    print(f"  年化收益   ：{_fmt(annualized)}")
+    print(f"  超额年化   ：{_fmt(excess_annualized)}")
+    print(f"  波动率     ：{_fmt(volatility)}")
+    print(f"  夏普比率   ：{_fmt(sharpe, suffix='')}")
+    print(f"  最大回撤   ：{_fmt(max_dd)}")
+    _print_separator("-", 90)
+
+
 def _print_stage_table(title: str, df: pd.DataFrame) -> None:
     """统一打印阶段性表格结果。"""
     _print_separator("-", 90)
@@ -1329,6 +1492,8 @@ def run_strategy(
     selected_factors: list[str] | None = None,
     progress_callback: Callable[[str, str, int | None, int | None], None] | None = None,
     use_cache: bool = False,
+    use_batch_data_cache: bool = False,
+    save_single_factor_results: bool = True,
 ) -> dict[str, object]:
     """运行多因子研究与回测主流程。"""
     if max_stage < 1 or max_stage > 4:
@@ -1361,6 +1526,7 @@ def run_strategy(
         dividend_type=config.DIVIDEND_TYPE,
         start_date=start_date,
         end_date=end_date,
+        use_batch_data_cache=use_batch_data_cache,
     )
 
     close_df = data_bundle.get("close")
@@ -1482,6 +1648,21 @@ def run_strategy(
         candidate_metrics_list.append(summary_df)
         candidate_factor_scores[factor_name] = factor_score_df
         _print_factor_evaluation(factor_name, summary_df)
+
+        # 阶段1即时落盘单因子分析结果（可通过对话框开关跳过以节省时间）。
+        if save_single_factor_results:
+            stage1_output_dir = Path(__file__).resolve().parent / config.OUTPUT_DIR
+            save_factor_evaluation_results(
+                output_dir=str(stage1_output_dir),
+                factor_name=factor_name,
+                ic_series=ic_series,
+                rank_ic_series=rank_ic_series,
+                rr_series=rr_series,
+                summary_df=summary_df,
+                backtest_results=single_factor_results,
+            )
+            factor_output_dir = stage1_output_dir / "factor_analysis" / factor_name / "latest"
+            print(f"[阶段1] 已保存单因子分析目录：{factor_output_dir}")
 
     candidate_metrics_df = pd.concat(candidate_metrics_list, ignore_index=True)
     _print_stage_table("阶段1结果：候选因子指标总表", candidate_metrics_df)
@@ -1660,26 +1841,16 @@ def run_strategy(
     print(f"[阶段4] 已保存组合统计 CSV：{output_dir / 'portfolio_stats.csv'}")
     print(f"[阶段4] 已保存净值曲线 CSV：{output_dir / 'equity_curve.csv'}")
     print(f"[阶段4] 已保存收益序列 CSV：{output_dir / 'returns.csv'}")
-    for factor_name, factor_result in factor_analysis.items():
-        save_factor_evaluation_results(
-            output_dir=str(output_dir),
-            factor_name=factor_name,
-            ic_series=factor_result["ic_series"],
-            rank_ic_series=factor_result["rank_ic_series"],
-            rr_series=factor_result["rr_series"],
-            summary_df=factor_result["summary_df"],
-            backtest_results=factor_result["single_factor_results"],
-        )
-        factor_output_dir = output_dir / "factor_analysis" / factor_name / "latest"
-        print(f"[阶段4] 已保存单因子分析目录：{factor_output_dir}")
-        print(f"[阶段4]   - 指标汇总 CSV：{factor_output_dir / 'summary.csv'}")
-        print(f"[阶段4]   - IC/RR 时序 CSV：{factor_output_dir / 'ic_ir_rr_timeseries.csv'}")
-        print(f"[阶段4]   - 单因子统计 CSV：{factor_output_dir / 'single_factor_stats.csv'}")
+    # 阶段1 已即时落盘单因子分析结果（若勾选），阶段4 不再重复写盘或打印单因子评价。
 
     print(f"[阶段4] 组合构建完成：最终因子={', '.join(final_factor_names)}")
     print(f"[阶段4] 对应权重：{final_weights}")
-    if hasattr(results.get("stats"), "loc") and "Total Return [%]" in results["stats"].index:
-        print(f"[阶段4] 组合总收益率：{results['stats'].loc['Total Return [%]']:.6f}%")
+    _print_backtest_metrics(
+        "阶段4 组合回测评价",
+        results.get("stats"),
+        returns=results.get("returns"),
+        benchmark_returns=results.get("benchmark_returns"),
+    )
 
     summary = {
         "start_date": data_bundle["start_date"],
@@ -1706,6 +1877,8 @@ if __name__ == "__main__":
     if run_params is None:
         print("已取消本次运行")
     else:
+        # 从用户点击「开始运行」后立即计时，覆盖整个运行流程
+        _run_start_time = time.perf_counter()
         progress_dialog = StrategyProgressDialog()
         progress_dialog.root.after(800, progress_dialog.close)
         progress_dialog.root.mainloop()
@@ -1722,6 +1895,8 @@ if __name__ == "__main__":
                     selected_factors=list(run_params["selected_factors"]),
                     progress_callback=None,
                     use_cache=bool(run_params.get("use_cache", False)),
+                    use_batch_data_cache=bool(run_params.get("use_batch_data_cache", False)),
+                    save_single_factor_results=bool(run_params.get("save_single_factor_results", True)),
                 )
             except Exception as exc:  # pragma: no cover - 运行期异常展示
                 run_error_holder.append(exc)
@@ -1730,7 +1905,16 @@ if __name__ == "__main__":
         worker.start()
         worker.join()
 
+        def _format_elapsed(seconds: float) -> str:
+            total_seconds = int(seconds)
+            hours = total_seconds // 3600
+            minutes = (total_seconds % 3600) // 60
+            secs = total_seconds % 60
+            return f"{hours} 小时 {minutes} 分钟 {secs} 秒（共 {seconds:.2f} 秒）"
+
         if run_error_holder:
+            _elapsed = time.perf_counter() - _run_start_time
+            print(f"[运行耗时] 任务异常中止，总耗时: {_format_elapsed(_elapsed)}")
             raise run_error_holder[0]
 
         summary = run_result["summary"]
@@ -1744,5 +1928,20 @@ if __name__ == "__main__":
         print(f"运行结束阶段: {summary['completed_stage']}")
         if summary["selected_factors"]:
             print(f"当前入选因子: {', '.join(summary['selected_factors'])}")
+            # 打印每个入选因子的方向（基于阶段2推断的 is_factor_higher_better）
+            direction_map: dict[str, bool] = {}
+            final_selection_df = summary.get("stage_results", {}).get("final_selection")
+            if final_selection_df is not None and not final_selection_df.empty and "is_factor_higher_better" in final_selection_df.columns:
+                for _, _row in final_selection_df.iterrows():
+                    direction_map[str(_row["factor"])] = bool(_row["is_factor_higher_better"])
+            print("入选因子方向:")
+            for _factor_name in summary["selected_factors"]:
+                _is_higher_better = direction_map.get(_factor_name, FACTOR_HIGHER_BETTER.get(_factor_name, True))
+                print(f"  - {_factor_name}: {_factor_direction_label(_is_higher_better)}")
         if summary["output_dir"]:
             print(f"输出目录: {summary['output_dir']}")
+
+        _elapsed = time.perf_counter() - _run_start_time
+        _print_separator("=", 90)
+        print(f"[运行耗时] 总耗时: {_format_elapsed(_elapsed)}")
+        _print_separator("=", 90)

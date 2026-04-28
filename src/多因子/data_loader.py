@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import hashlib
+import pickle
 from typing import Any
+from pathlib import Path
 
 import pandas as pd
 
@@ -10,12 +13,92 @@ from src.基础筛选.filterStocks import get_universe_with_basics
 
 from src.多因子 import config
 
-try:
-    # 这里仅用于补充证券简称，并在基础股票池层面过滤 ST。
-    # 如果 xtquant 不可用，不让整个框架崩掉，而是退化为“不做 ST 名称过滤”。
-    from xtquant import xtdata
-except Exception:  # pragma: no cover - 依赖运行环境
-    xtdata = None
+BATCH_DATA_CACHE_DIR = Path(__file__).resolve().parent / "batch_data_cache"
+_XTDATA: Any | None = None
+_XTDATA_LOADED = False
+_STRATEGY_DATE_RANGE_CACHE: tuple[str, str, str] | None = None
+
+
+def _get_xtdata() -> Any | None:
+    global _XTDATA, _XTDATA_LOADED
+    if _XTDATA_LOADED:
+        return _XTDATA
+    _XTDATA_LOADED = True
+    try:
+        from xtquant import xtdata as imported_xtdata
+    except Exception:  # pragma: no cover - 依赖运行环境
+        _XTDATA = None
+    else:
+        _XTDATA = imported_xtdata
+    return _XTDATA
+
+
+def _batch_data_cache_path(
+    start_date: str,
+    end_date: str,
+    max_price: float,
+    max_mcap: float,
+    dividend_type: str,
+) -> Path:
+    key = f"{start_date}|{end_date}|{max_price}|{max_mcap}|{dividend_type}"
+    digest = hashlib.md5(key.encode("utf-8")).hexdigest()[:12]
+    return BATCH_DATA_CACHE_DIR / f"batch_data__{start_date}_{end_date}__{digest}.pkl"
+
+
+def load_batch_data_bundle_from_cache(
+    start_date: str,
+    end_date: str,
+    max_price: float,
+    max_mcap: float,
+    dividend_type: str,
+) -> dict[str, Any] | None:
+    cache_path = _batch_data_cache_path(start_date, end_date, max_price, max_mcap, dividend_type)
+    if not cache_path.exists():
+        return None
+    try:
+        with cache_path.open("rb") as file:
+            cached = pickle.load(file)
+    except Exception as exc:  # pragma: no cover - 缓存损坏时回退重新下载
+        print(f"[批量数据缓存] 读取 {cache_path.name} 失败，将重新下载：{exc}")
+        return None
+    if not isinstance(cached, dict):
+        return None
+    return cached
+
+
+def save_batch_data_bundle_to_cache(
+    start_date: str,
+    end_date: str,
+    max_price: float,
+    max_mcap: float,
+    dividend_type: str,
+    data_bundle: dict[str, Any],
+) -> None:
+    BATCH_DATA_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    cache_path = _batch_data_cache_path(start_date, end_date, max_price, max_mcap, dividend_type)
+    try:
+        with cache_path.open("wb") as file:
+            pickle.dump(data_bundle, file, protocol=pickle.HIGHEST_PROTOCOL)
+    except Exception as exc:  # pragma: no cover - 写缓存失败不影响主流程
+        print(f"[批量数据缓存] 写入 {cache_path.name} 失败：{exc}")
+
+
+def list_batch_data_cache_files() -> list[Path]:
+    if not BATCH_DATA_CACHE_DIR.exists():
+        return []
+    return sorted(BATCH_DATA_CACHE_DIR.glob("*.pkl"))
+
+
+def clear_batch_data_cache() -> tuple[int, list[str]]:
+    deleted = 0
+    failures: list[str] = []
+    for cache_file in list_batch_data_cache_files():
+        try:
+            cache_file.unlink()
+            deleted += 1
+        except Exception as exc:  # pragma: no cover - 极少触发
+            failures.append(f"{cache_file.name}: {exc}")
+    return deleted, failures
 
 
 def get_strategy_date_range() -> tuple[str, str, str]:
@@ -30,8 +113,10 @@ def get_strategy_date_range() -> tuple[str, str, str]:
         end_date: 结束日期，格式为 `YYYYMMDD`
         reason: 结束日期为何取该值的说明文字
     """
-    start_date, end_date, reason = get_date_range()
-    return start_date, end_date, reason
+    global _STRATEGY_DATE_RANGE_CACHE
+    if _STRATEGY_DATE_RANGE_CACHE is None:
+        _STRATEGY_DATE_RANGE_CACHE = get_date_range()
+    return _STRATEGY_DATE_RANGE_CACHE
 
 
 def _get_stock_name(code: str) -> str | None:
@@ -41,6 +126,7 @@ def _get_stock_name(code: str) -> str | None:
     不同环境下字段名可能不同，所以做一个兼容性轮询。
     只要能拿到名称，就用于后续 ST 识别；拿不到则返回 `None`。
     """
+    xtdata = _get_xtdata()
     if xtdata is None:
         return None
 
@@ -266,6 +352,7 @@ def build_data_bundle(
     dividend_type: str = config.DIVIDEND_TYPE,
     start_date: str | None = None,
     end_date: str | None = None,
+    use_batch_data_cache: bool = False,
 ) -> dict[str, Any]:
     """构建策略运行所需的数据包。
 
@@ -286,6 +373,18 @@ def build_data_bundle(
         start_date, end_date, date_reason = get_strategy_date_range()
     else:
         date_reason = "手动指定日期范围"
+    if use_batch_data_cache:
+        cached_bundle = load_batch_data_bundle_from_cache(
+            start_date=start_date,
+            end_date=end_date,
+            max_price=max_price,
+            max_mcap=max_mcap,
+            dividend_type=dividend_type,
+        )
+        if cached_bundle is not None:
+            print(f"[批量数据缓存] 命中缓存，直接读取硬盘数据：{start_date} ~ {end_date}")
+            return cached_bundle
+        print(f"[批量数据缓存] 未命中缓存，将正常批量下载并在完成后写入缓存：{start_date} ~ {end_date}")
     universe_df = load_base_universe(max_price=max_price, max_mcap=max_mcap)
     stock_codes = universe_df["code"].tolist() if not universe_df.empty else []
 
@@ -305,7 +404,7 @@ def build_data_bundle(
         dividend_type=dividend_type,
     )
 
-    return {
+    data_bundle = {
         "universe": universe_df,
         "bars": bar_dict,
         "benchmark_close": benchmark_close,
@@ -314,3 +413,14 @@ def build_data_bundle(
         "date_reason": date_reason,
         **aligned,
     }
+    if use_batch_data_cache:
+        save_batch_data_bundle_to_cache(
+            start_date=start_date,
+            end_date=end_date,
+            max_price=max_price,
+            max_mcap=max_mcap,
+            dividend_type=dividend_type,
+            data_bundle=data_bundle,
+        )
+        print(f"[批量数据缓存] 已写入缓存：{start_date} ~ {end_date}")
+    return data_bundle
