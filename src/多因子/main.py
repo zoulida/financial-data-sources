@@ -317,7 +317,7 @@ def _rank_score_by_factor_direction(factor_df: pd.DataFrame, is_factor_higher_be
 
 def _factor_direction_label(is_factor_higher_better: bool) -> str:
     """生成阶段输出中使用的因子方向说明。"""
-    return "因子大→好(is_factor_higher_better=True)" if is_factor_higher_better else "因子小→好(is_factor_higher_better=False)"
+    return str(bool(is_factor_higher_better))
 
 
 def _factor_cache_path(factor_name: str, start_date: str, end_date: str) -> Path:
