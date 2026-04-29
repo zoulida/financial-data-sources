@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import warnings
+
 import numpy as np
 import pandas as pd
 
@@ -51,7 +53,9 @@ def stddev(df: pd.DataFrame, window: int) -> pd.DataFrame:
 
 
 def correlation(x_df: pd.DataFrame, y_df: pd.DataFrame, window: int) -> pd.DataFrame:
-    return x_df.rolling(window, min_periods=window).corr(y_df)
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", message="invalid value encountered in divide", category=RuntimeWarning)
+        return x_df.rolling(window, min_periods=window).corr(y_df)
 
 
 def covariance(x_df: pd.DataFrame, y_df: pd.DataFrame, window: int) -> pd.DataFrame:

@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import warnings
+
 import numpy as np
 import pandas as pd
 from typing import Any, Union
+
+warnings.filterwarnings("ignore", message="invalid value encountered in divide", category=RuntimeWarning)
 
 
 def RANK(data: pd.DataFrame) -> pd.DataFrame:

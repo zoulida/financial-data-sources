@@ -519,7 +519,7 @@ def _calc_group_monotonicity(factor_name: str, group_return_df: pd.DataFrame) ->
     avg_returns = group_return_df.mean().reindex(["G1", "G2", "G3", "G4", "G5"])
     values = avg_returns.to_numpy(dtype=float)
     valid_values = values[~np.isnan(values)]
-    if len(valid_values) < 2:
+    if len(valid_values) < 2 or len(np.unique(valid_values)) <= 1:
         spearman = np.nan
         diffs = np.array([], dtype=float)
     else:

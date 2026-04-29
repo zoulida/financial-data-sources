@@ -82,6 +82,8 @@ def _calc_cross_section_corr(
     merged = merged.replace([np.inf, -np.inf], np.nan).dropna()
     if len(merged) < 3:
         return np.nan
+    if merged["factor"].nunique(dropna=True) <= 1 or merged["future_return"].nunique(dropna=True) <= 1:
+        return np.nan
     return float(merged["factor"].corr(merged["future_return"], method=method))
 
 

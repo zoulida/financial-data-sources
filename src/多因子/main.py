@@ -307,6 +307,7 @@ FACTOR_LABELS = {name: str(spec["label"]) for name, spec in FACTOR_REGISTRY.item
 
 
 FACTOR_CACHE_DIR = Path(__file__).resolve().parent / "factor_cache"
+CANDIDATE_EVALUATION_CACHE_DIR = Path(__file__).resolve().parent / "candidate_evaluation_cache"
 
 
 def _rank_score_by_factor_direction(factor_df: pd.DataFrame, is_factor_higher_better: bool) -> pd.DataFrame:
@@ -355,6 +356,53 @@ def _list_factor_cache_files() -> list[Path]:
     if not FACTOR_CACHE_DIR.exists():
         return []
     return sorted(FACTOR_CACHE_DIR.glob("*.pkl"))
+
+
+def _candidate_evaluation_cache_path(factor_name: str, start_date: str, end_date: str) -> Path:
+    """构造候选因子评估缓存文件路径。"""
+    safe_name = factor_name.replace("/", "_").replace("\\", "_")
+    return CANDIDATE_EVALUATION_CACHE_DIR / f"{safe_name}__{start_date}_{end_date}.pkl"
+
+
+def _load_candidate_evaluation_from_cache(factor_name: str, start_date: str, end_date: str) -> dict[str, object] | None:
+    """命中缓存时加载候选因子评估结果；未命中或读取失败返回 None。"""
+    cache_path = _candidate_evaluation_cache_path(factor_name, start_date, end_date)
+    if not cache_path.exists():
+        return None
+    try:
+        cached = pd.read_pickle(cache_path)
+    except Exception as exc:  # pragma: no cover - 缓存损坏时回退重新计算
+        print(f"[评估缓存] 读取 {cache_path.name} 失败，将重新计算：{exc}")
+        return None
+    if not isinstance(cached, dict):
+        return None
+    required_keys = {
+        "masked_factor_df",
+        "factor_score_df",
+        "ic_series",
+        "rank_ic_series",
+        "rr_series",
+        "summary_df",
+        "single_factor_results",
+    }
+    if not required_keys.issubset(cached.keys()):
+        return None
+    return cached
+
+
+def _save_candidate_evaluation_to_cache(
+    factor_name: str,
+    start_date: str,
+    end_date: str,
+    evaluation_result: dict[str, object],
+) -> None:
+    """把候选因子评估结果写入缓存文件。"""
+    CANDIDATE_EVALUATION_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    cache_path = _candidate_evaluation_cache_path(factor_name, start_date, end_date)
+    try:
+        pd.to_pickle(evaluation_result, cache_path)
+    except Exception as exc:  # pragma: no cover - 写缓存失败不影响主流程
+        print(f"[评估缓存] 写入 {cache_path.name} 失败：{exc}")
 
 
 LAST_RUN_PATH = Path(__file__).resolve().parent / ".last_run.json"
@@ -629,12 +677,19 @@ class StrategyRunDialog:
         default_max_stage = last_max_stage if isinstance(last_max_stage, int) and 1 <= last_max_stage <= 4 else 4
         default_use_cache = bool(last_run_config.get("use_cache", False))
         default_use_batch_data_cache = bool(last_run_config.get("use_batch_data_cache", False))
+        default_use_candidate_evaluation_cache = bool(last_run_config.get("use_candidate_evaluation_cache", False))
         default_save_single_factor = bool(last_run_config.get("save_single_factor_results", True))
+        last_weight_method = last_run_config.get("weight_method")
+        default_weight_method = (
+            last_weight_method
+            if isinstance(last_weight_method, str) and last_weight_method in {"equal", "icir", "max_ir"}
+            else "equal"
+        )
 
         self.root = tk.Tk()
         self.root.title("多因子运行参数")
         self.root.resizable(False, False)
-        self._center_window(820, 680)
+        self._center_window(820, 800)
 
         container = ttk.Frame(self.root, padding=16)
         container.pack(fill="both", expand=True)
@@ -775,9 +830,19 @@ class StrategyRunDialog:
         self.batch_data_cache_status_var = tk.StringVar(value=self._build_batch_data_cache_status_text())
         ttk.Label(batch_cache_frame, textvariable=self.batch_data_cache_status_var, foreground="#666666").pack(side="left", padx=(10, 0))
 
-        ttk.Label(container, text="单因子分析结果").grid(row=9, column=0, sticky="nw", pady=(0, 12))
+        ttk.Label(container, text="候选因子评估缓存").grid(row=9, column=0, sticky="nw", pady=(0, 12))
+        candidate_eval_cache_frame = ttk.Frame(container)
+        candidate_eval_cache_frame.grid(row=9, column=1, sticky="w", pady=(0, 12))
+        self.use_candidate_evaluation_cache_var = tk.BooleanVar(value=default_use_candidate_evaluation_cache)
+        ttk.Checkbutton(
+            candidate_eval_cache_frame,
+            text="使用评估候选因子缓存（按因子名+日期范围复用，命中时跳过阶段1评估）",
+            variable=self.use_candidate_evaluation_cache_var,
+        ).pack(side="left")
+
+        ttk.Label(container, text="单因子分析结果").grid(row=10, column=0, sticky="nw", pady=(0, 12))
         save_sf_frame = ttk.Frame(container)
-        save_sf_frame.grid(row=9, column=1, sticky="w", pady=(0, 12))
+        save_sf_frame.grid(row=10, column=1, sticky="w", pady=(0, 12))
         self.save_single_factor_var = tk.BooleanVar(value=default_save_single_factor)
         ttk.Checkbutton(
             save_sf_frame,
@@ -785,9 +850,9 @@ class StrategyRunDialog:
             variable=self.save_single_factor_var,
         ).pack(side="left")
 
-        ttk.Label(container, text="运行到第几阶段").grid(row=10, column=0, sticky="nw")
+        ttk.Label(container, text="运行到第几阶段").grid(row=11, column=0, sticky="nw")
         stage_frame = ttk.Frame(container)
-        stage_frame.grid(row=10, column=1, sticky="w")
+        stage_frame.grid(row=11, column=1, sticky="w")
         self.max_stage_var = tk.IntVar(value=default_max_stage)
         for stage, label in [
             (1, "阶段1：单因子评估"),
@@ -797,15 +862,26 @@ class StrategyRunDialog:
         ]:
             ttk.Radiobutton(stage_frame, text=label, variable=self.max_stage_var, value=stage).pack(anchor="w", pady=1)
 
+        ttk.Label(container, text="阶段4 权重方法").grid(row=12, column=0, sticky="nw", pady=(8, 0))
+        weight_frame = ttk.Frame(container)
+        weight_frame.grid(row=12, column=1, sticky="w", pady=(8, 0))
+        self.weight_method_var = tk.StringVar(value=default_weight_method)
+        for value, label in [
+            ("equal", "等权重"),
+            ("icir", "ICIR 加权（按 RankIC 均值/标准差，截断负值后归一化）"),
+            ("max_ir", "Max IR（协方差压缩降噪后求 Σ⁻¹·μ，最大化复合 IR）"),
+        ]:
+            ttk.Radiobutton(weight_frame, text=label, variable=self.weight_method_var, value=value).pack(anchor="w", pady=1)
+
         ttk.Label(container, text="默认日期沿用当前策略原始范围，可直接修改。", foreground="#666666").grid(
-            row=11, column=0, columnspan=2, sticky="w", pady=(12, 4)
+            row=13, column=0, columnspan=2, sticky="w", pady=(12, 4)
         )
 
         self.message_var = tk.StringVar(value="")
-        ttk.Label(container, textvariable=self.message_var, foreground="#cc3333").grid(row=12, column=0, columnspan=2, sticky="w", pady=(14, 8))
+        ttk.Label(container, textvariable=self.message_var, foreground="#cc3333").grid(row=14, column=0, columnspan=2, sticky="w", pady=(14, 8))
 
         button_frame = ttk.Frame(container)
-        button_frame.grid(row=13, column=0, columnspan=2, sticky="e")
+        button_frame.grid(row=15, column=0, columnspan=2, sticky="e")
         ttk.Button(button_frame, text="取消", command=self._cancel).pack(side="right", padx=(8, 0))
         ttk.Button(button_frame, text="开始运行", command=self._confirm).pack(side="right")
 
@@ -1083,7 +1159,9 @@ class StrategyRunDialog:
             "selected_factors": selected_factors,
             "use_cache": bool(self.use_cache_var.get()),
             "use_batch_data_cache": bool(self.use_batch_data_cache_var.get()),
+            "use_candidate_evaluation_cache": bool(self.use_candidate_evaluation_cache_var.get()),
             "save_single_factor_results": bool(self.save_single_factor_var.get()),
+            "weight_method": str(self.weight_method_var.get()),
         }
         _save_last_run_config(self.result)
         self.root.destroy()
@@ -1241,6 +1319,17 @@ def _build_correlation_artifacts(selected_factor_scores: dict[str, pd.DataFrame]
         flattened[factor_name] = score_df.stack(future_stack=True)
 
     score_panel = pd.DataFrame(flattened)
+    valid_columns = [
+        column
+        for column in score_panel.columns
+        if score_panel[column].dropna().nunique(dropna=True) > 1
+    ]
+    score_panel = score_panel[valid_columns]
+    if score_panel.empty:
+        factor_names = list(flattened.keys())
+        return pd.DataFrame(index=factor_names, columns=factor_names, dtype=float), pd.DataFrame(
+            columns=["factor_a", "factor_b", "corr"]
+        )
     corr_matrix = score_panel.corr()
 
     corr_rows: list[dict[str, object]] = []
@@ -1354,9 +1443,29 @@ def _print_backtest_metrics(
     sharpe = _get("Sharpe Ratio")
     max_dd = _get("Max Drawdown [%]")
 
-    # 年化收益：根据 stats 中的 Period（Timedelta）或外部传入天数计算。
+    # 年化收益：优先按 returns / benchmark_returns 索引的首尾日期计算日历天数，
+    # 否则退回 stats["Period"]（注意 vectorbt 的 Period 是 bar 数*1天，按交易日计，
+    # 会比真实日历区间小，导致年化收益被高估）。
     annualized = float("nan")
     days: float | None = period_days
+
+    def _calendar_days_from_index(series: pd.Series | None) -> float | None:
+        if not isinstance(series, pd.Series) or series.empty:
+            return None
+        try:
+            idx = pd.to_datetime(series.index)
+        except Exception:
+            return None
+        if len(idx) < 2:
+            return None
+        delta = idx[-1] - idx[0]
+        d = float(delta.days) + delta.seconds / 86400.0
+        return d if d > 0 else None
+
+    if days is None:
+        days = _calendar_days_from_index(returns)
+    if days is None:
+        days = _calendar_days_from_index(benchmark_returns)
     if days is None:
         try:
             period_value = stats.loc["Period"] if "Period" in stats.index else None
@@ -1485,6 +1594,117 @@ def _get_run_params() -> dict[str, object] | None:
     return dialog.show()
 
 
+def _equal_weights(factor_names: list[str]) -> dict[str, float]:
+    """生成等权重字典。"""
+    if not factor_names:
+        return {}
+    weight_value = 1.0 / len(factor_names)
+    return {name: weight_value for name in factor_names}
+
+
+def _collect_aligned_rank_ic(
+    factor_names: list[str],
+    factor_analysis: dict[str, dict[str, object]],
+    is_higher_better: dict[str, bool],
+) -> pd.DataFrame:
+    """汇总各因子的 RankIC 序列并按方向对齐（lower_better 取反），返回宽表。"""
+    series_dict: dict[str, pd.Series] = {}
+    for name in factor_names:
+        info = factor_analysis.get(name) or {}
+        series = info.get("rank_ic_series")
+        if not isinstance(series, pd.Series) or series.empty:
+            continue
+        sign = 1.0 if bool(is_higher_better.get(name, True)) else -1.0
+        series_dict[name] = series.astype(float) * sign
+    if not series_dict:
+        return pd.DataFrame()
+    return pd.concat(series_dict, axis=1).dropna(how="all")
+
+
+def _normalize_positive_weights(
+    factor_names: list[str],
+    raw_weights: dict[str, float],
+) -> dict[str, float]:
+    """把负值截断为 0 后归一化；若全为 0 则回退到等权。"""
+    clipped = {name: max(float(raw_weights.get(name, 0.0)), 0.0) for name in factor_names}
+    total = sum(clipped.values())
+    if total <= 0 or not np.isfinite(total):
+        return _equal_weights(factor_names)
+    return {name: value / total for name, value in clipped.items()}
+
+
+def _compute_factor_weights(
+    factor_names: list[str],
+    factor_analysis: dict[str, dict[str, object]],
+    method: str,
+    is_higher_better: dict[str, bool],
+) -> dict[str, float]:
+    """根据用户选择的方法计算阶段4各因子的合成权重。
+
+    - equal：等权重；
+    - icir：按方向对齐后的 RankIC 均值/标准差，截断负值后归一化；
+    - max_ir：协方差压缩降噪（对角线收缩）后求 Σ⁻¹·μ，最大化复合 IR，截断负值后归一化。
+    任意方法在数值不稳定（NaN/全 0/Σ 不可逆）时自动回退到等权重。
+    """
+    if not factor_names:
+        return {}
+    if method == "equal":
+        return _equal_weights(factor_names)
+
+    ic_df = _collect_aligned_rank_ic(factor_names, factor_analysis, is_higher_better)
+    if ic_df.empty:
+        print("[阶段4][权重] RankIC 序列为空，回退等权重")
+        return _equal_weights(factor_names)
+    # 仅对存在 IC 序列的因子求权重，缺失因子兜底为 0（之后归一化）。
+    available_names = [name for name in factor_names if name in ic_df.columns]
+    missing_names = [name for name in factor_names if name not in ic_df.columns]
+    if missing_names:
+        print(f"[阶段4][权重] 以下因子无有效 RankIC 序列，权重置 0：{missing_names}")
+
+    mean_ic = ic_df[available_names].mean(axis=0)
+    std_ic = ic_df[available_names].std(axis=0, ddof=1)
+
+    if method == "icir":
+        with np.errstate(divide="ignore", invalid="ignore"):
+            icir = mean_ic / std_ic.replace(0.0, np.nan)
+        raw_weights = {name: float(icir.get(name, np.nan)) for name in factor_names}
+        raw_weights = {
+            name: (value if np.isfinite(value) else 0.0)
+            for name, value in raw_weights.items()
+        }
+        return _normalize_positive_weights(factor_names, raw_weights)
+
+    if method == "max_ir":
+        if len(available_names) < 2:
+            # 单因子无需协方差，直接退化为 ICIR / 等权。
+            print("[阶段4][权重] Max IR 需要 ≥2 个因子，回退等权重")
+            return _equal_weights(factor_names)
+        mu = mean_ic.values.astype(float)
+        cov = ic_df[available_names].cov().values.astype(float)
+        # Ledoit-Wolf 风格的对角线收缩：Σ_shrunk = (1-α)Σ + α * diag(Σ)，α=0.1。
+        shrinkage = 0.1
+        diag_only = np.diag(np.diag(cov))
+        cov_shrunk = (1.0 - shrinkage) * cov + shrinkage * diag_only
+        # 数值正则化，避免奇异矩阵。
+        ridge = 1e-8 * np.trace(cov_shrunk) / max(cov_shrunk.shape[0], 1)
+        cov_shrunk = cov_shrunk + np.eye(cov_shrunk.shape[0]) * max(ridge, 1e-12)
+        try:
+            raw_w = np.linalg.solve(cov_shrunk, mu)
+        except np.linalg.LinAlgError as exc:
+            print(f"[阶段4][权重] Max IR 求解失败({exc})，回退等权重")
+            return _equal_weights(factor_names)
+        if not np.all(np.isfinite(raw_w)):
+            print("[阶段4][权重] Max IR 求解出现非有限值，回退等权重")
+            return _equal_weights(factor_names)
+        raw_weights = {name: 0.0 for name in factor_names}
+        for name, value in zip(available_names, raw_w):
+            raw_weights[name] = float(value)
+        return _normalize_positive_weights(factor_names, raw_weights)
+
+    # 防御性兜底（理论上前面已校验）。
+    return _equal_weights(factor_names)
+
+
 def run_strategy(
     start_date: str | None = None,
     end_date: str | None = None,
@@ -1493,11 +1713,15 @@ def run_strategy(
     progress_callback: Callable[[str, str, int | None, int | None], None] | None = None,
     use_cache: bool = False,
     use_batch_data_cache: bool = False,
+    use_candidate_evaluation_cache: bool = False,
     save_single_factor_results: bool = True,
+    weight_method: str = "equal",
 ) -> dict[str, object]:
     """运行多因子研究与回测主流程。"""
     if max_stage < 1 or max_stage > 4:
         raise ValueError("max_stage 必须在 1 到 4 之间")
+    if weight_method not in {"equal", "icir", "max_ir"}:
+        raise ValueError(f"weight_method 不合法：{weight_method}")
 
     if selected_factors is None:
         selected_factors = list(FACTOR_LABELS.keys())
@@ -1589,11 +1813,36 @@ def run_strategy(
     print("[阶段1] 开始逐个评估候选因子...")
     _print_separator("=", 90)
     report_progress("阶段1：评估候选因子", "正在计算 IC / RankIC / RR 和单因子回测...", 0, len(raw_factor_dict))
+    if use_candidate_evaluation_cache:
+        print(f"[评估缓存] 已启用候选因子评估缓存，目录：{CANDIDATE_EVALUATION_CACHE_DIR}，区间：{cache_start} ~ {cache_end}")
     factor_analysis: dict[str, dict[str, object]] = {}
     candidate_metrics_list: list[pd.DataFrame] = []
     candidate_factor_scores: dict[str, pd.DataFrame] = {}
 
     for factor_index, (factor_name, raw_factor_df) in enumerate(raw_factor_dict.items(), start=1):
+        cached_evaluation: dict[str, object] | None = None
+        if use_candidate_evaluation_cache:
+            cached_evaluation = _load_candidate_evaluation_from_cache(factor_name, cache_start, cache_end)
+        if cached_evaluation is not None:
+            report_progress(
+                "阶段1：评估候选因子",
+                f"命中评估缓存 {factor_name}，跳过评估",
+                factor_index,
+                len(raw_factor_dict),
+            )
+            factor_analysis[factor_name] = {
+                "raw_factor_df": raw_factor_df,
+                **cached_evaluation,
+            }
+            summary_df = cached_evaluation["summary_df"]
+            factor_score_df = cached_evaluation["factor_score_df"]
+            if not isinstance(summary_df, pd.DataFrame) or not isinstance(factor_score_df, pd.DataFrame):
+                raise TypeError(f"{factor_name} 的评估缓存格式不正确")
+            candidate_metrics_list.append(summary_df)
+            candidate_factor_scores[factor_name] = factor_score_df
+            _print_factor_evaluation(factor_name, summary_df)
+            continue
+
         report_progress(
             "阶段1：评估候选因子",
             f"正在评估 {factor_name} ...",
@@ -1645,6 +1894,21 @@ def run_strategy(
             "summary_df": summary_df,
             "single_factor_results": single_factor_results,
         }
+        if use_candidate_evaluation_cache:
+            _save_candidate_evaluation_to_cache(
+                factor_name,
+                cache_start,
+                cache_end,
+                {
+                    "masked_factor_df": masked_factor_df,
+                    "factor_score_df": factor_score_df,
+                    "ic_series": ic_series,
+                    "rank_ic_series": rank_ic_series,
+                    "rr_series": rr_series,
+                    "summary_df": summary_df,
+                    "single_factor_results": single_factor_results,
+                },
+            )
         candidate_metrics_list.append(summary_df)
         candidate_factor_scores[factor_name] = factor_score_df
         _print_factor_evaluation(factor_name, summary_df)
@@ -1802,7 +2066,13 @@ def run_strategy(
     print("[阶段4] 开始构建最终多因子组合并回测...")
     _print_separator("=", 90)
     report_progress("阶段4：组合构建与回测", "正在合成最终分数并运行回测...")
-    final_weights = {factor_name: 1.0 / len(final_factor_names) for factor_name in final_factor_names}
+    final_weights = _compute_factor_weights(
+        final_factor_names,
+        factor_analysis,
+        method=weight_method,
+        is_higher_better=inferred_factor_higher_better,
+    )
+    print(f"[阶段4] 权重方法：{weight_method}")
     selected_factor_scores = {name: adjusted_factor_scores[name] for name in final_factor_names}
     score_df = combine_factor_scores(selected_factor_scores, final_weights)
     selection_df = select_top_n(score_df, n=config.HOLD_NUM)
@@ -1896,7 +2166,9 @@ if __name__ == "__main__":
                     progress_callback=None,
                     use_cache=bool(run_params.get("use_cache", False)),
                     use_batch_data_cache=bool(run_params.get("use_batch_data_cache", False)),
+                    use_candidate_evaluation_cache=bool(run_params.get("use_candidate_evaluation_cache", False)),
                     save_single_factor_results=bool(run_params.get("save_single_factor_results", True)),
+                    weight_method=str(run_params.get("weight_method", "equal")),
                 )
             except Exception as exc:  # pragma: no cover - 运行期异常展示
                 run_error_holder.append(exc)

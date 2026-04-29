@@ -99,7 +99,7 @@ BENCHMARK_NAME = "中证2000"
 REBALANCE_FREQ = "W-FRI"
 
 # 每期持有股票数量。
-HOLD_NUM = 260
+HOLD_NUM = 26
 
 # 交易费用参数。
 # 按你的最新要求，手续费暂时设为 0。
