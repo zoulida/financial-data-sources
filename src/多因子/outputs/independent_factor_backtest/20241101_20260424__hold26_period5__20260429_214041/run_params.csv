@@ -1,0 +1,8 @@
+﻿key,value
+start_date,20241101
+end_date,20260424
+hold_num,26
+period_days,5
+use_batch_data_cache,True
+use_factor_cache,True
+factors,"alpha158.roc_rank_60,alpha101.alpha003,alpha101.alpha006,alpha101.alpha041,alpha101.alpha044,alpha101.alpha054,alpha101.alpha063,alpha101.alpha068,alpha191.alpha083,alpha191.alpha090,alpha191.alpha101,alpha191.alpha113,alpha191.alpha182,alpha191.alpha190"

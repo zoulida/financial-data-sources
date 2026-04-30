@@ -67,6 +67,40 @@ BASE_FACTOR_LABELS = {
 }
 
 
+# 因子风格分类（人工维护，便于打印时直观看到 趋势/反转/量价 等类型）。
+# 未在此字典中的因子会显示 "未分类"。可逐步补充。
+FACTOR_STYLE_LABELS: dict[str, str] = {
+    # ===== 自定义基础因子 =====
+    "momentum_20": "趋势",
+    "risk_adjusted_momentum_20": "趋势",
+
+    # ===== Alpha158 =====
+    "alpha158.roc_rank_60": "趋势",  # 60日 ROC 排名 → 中期动量
+
+    # ===== Alpha101（按公式语义初步分类，可按 IC 实测后调整） =====
+    "alpha101.alpha003": "反转",  # rank(open) 与 rank(volume) 量价背离
+    "alpha101.alpha006": "反转",  # -correlation(open, volume, 10)
+    "alpha101.alpha041": "反转",  # √(H·L) - VWAP，日内成交重心反转
+    "alpha101.alpha044": "反转",  # -correlation(high, rank(volume), 5)
+    "alpha101.alpha054": "形态",  # 日内开收 / 高低位置形态因子
+    "alpha101.alpha063": "趋势",  # decay_linear(close - delay) 衰减加权动量
+    "alpha101.alpha068": "量价",  # 高价与量秩相关综合
+
+    # ===== Alpha191 =====
+    "alpha191.alpha083": "反转",  # 短窗口价格-成交量秩相关
+    "alpha191.alpha090": "量价",  # rank(corr(vwap, volume))
+    "alpha191.alpha101": "量价",  # 高价/成交量综合
+    "alpha191.alpha113": "反转",  # 短期 returns 衰减
+    "alpha191.alpha182": "形态",  # 收盘 vs 开盘日内方向计数
+    "alpha191.alpha190": "波动",  # 收益率序列偏度/异常度
+}
+
+
+def _factor_style_label(factor_name: str) -> str:
+    """返回因子风格标签（趋势/反转/量价/形态/波动/...）。"""
+    return FACTOR_STYLE_LABELS.get(factor_name, "未分类")
+
+
 ALPHA158_FACTOR_SPECS = {
     "kbar_open_close_ratio": {"args": ["open", "close"], "label": "Alpha158 K线开收比"},
     "kbar_high_low_ratio": {"args": ["high", "low"], "label": "Alpha158 K线高低比"},
@@ -2206,10 +2240,13 @@ if __name__ == "__main__":
             if final_selection_df is not None and not final_selection_df.empty and "is_factor_higher_better" in final_selection_df.columns:
                 for _, _row in final_selection_df.iterrows():
                     direction_map[str(_row["factor"])] = bool(_row["is_factor_higher_better"])
-            print("入选因子方向:")
+            print("入选因子方向 / 风格:")
             for _factor_name in summary["selected_factors"]:
                 _is_higher_better = direction_map.get(_factor_name, FACTOR_HIGHER_BETTER.get(_factor_name, True))
-                print(f"  - {_factor_name}: {_factor_direction_label(_is_higher_better)}")
+                _style = _factor_style_label(_factor_name)
+                print(
+                    f"  - {_factor_name}: 方向={_factor_direction_label(_is_higher_better)}  风格={_style}"
+                )
         if summary["output_dir"]:
             print(f"输出目录: {summary['output_dir']}")
 
