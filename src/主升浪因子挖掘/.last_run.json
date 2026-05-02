@@ -1,0 +1,25 @@
+{
+  "start_date": "20241101",
+  "end_date": "20260424",
+  "forward_days": 20,
+  "return_threshold": 0.3,
+  "max_drawdown": 0.08,
+  "top_k_list": [
+    10,
+    20,
+    50,
+    100
+  ],
+  "selected_factors": [
+    "blastoff.amount_anomaly_5",
+    "blastoff.higher_lows_20",
+    "blastoff.ma_alignment",
+    "blastoff.range_squeeze_20",
+    "blastoff.vol_shrink_20"
+  ],
+  "use_event_cache": true,
+  "use_batch_data_cache": true,
+  "enable_combo_backtest": true,
+  "corr_threshold": 0.8,
+  "hold_num": 26
+}
