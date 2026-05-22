@@ -1,0 +1,15 @@
+{
+  "population_size": 6,
+  "generations": 1,
+  "archive_size": 2,
+  "lineage_records": 2,
+  "unique_expressions": 13,
+  "operation_counts": {
+    "random_init": 2
+  },
+  "exported": 2,
+  "selected_factors": [
+    "ga_final_0000",
+    "ga_final_0001"
+  ]
+}

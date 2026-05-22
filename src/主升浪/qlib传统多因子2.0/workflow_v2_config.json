@@ -1,5 +1,5 @@
 {
-  "provider_uri": "d:/pythonProject/sdufe-qlib/source/qlib-data数据下载/cn_data",
+  "provider_uri": "d:\\pythonProject\\数据源\\md\\qlib数据\\qlib_data\\cn_data",
   "market": "all",
   "benchmark": "SH000300",
   "start_time": "2024-11-01",
@@ -45,6 +45,14 @@
   "rolling_ic_window": 60,
   "filter_use_train_only": true,
   "backtest_test_period_only": true,
+  "enable_factor_profile": true,
+  "factor_profile_past_windows": [
+    "1",
+    "3",
+    "5",
+    "10"
+  ],
+  "factor_profile_future_window": 3,
   "enable_price_filter": true,
   "min_close_price": 2.0,
   "max_close_price": 15.0,

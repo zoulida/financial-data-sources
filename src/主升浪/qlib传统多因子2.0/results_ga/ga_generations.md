@@ -2478,3 +2478,365 @@
         parent[1] = ts_min[10](open)
         └─ gen=0 op=random_init (root)
 ```
+
+## 第 0 代  best=1.0588  mean=0.6243  n_valid=34  archive=15
+- 本代有效个体操作分布：random_init=34
+
+| 排名 | 因子 | 来源 | 变异点 | fitness | rank_ic | IR | depth | complexity | 表达式 |
+|---|---|---|---|---|---|---|---|---|---|
+| 1 | ga_g000_0037 | random_init |  | 1.0588 | -0.1392 | -2.23 | 2 | 2 | `ts_min[20](open)` |
+| 2 | ga_g000_0055 | random_init |  | 1.0572 | -0.1326 | -2.12 | 2 | 2 | `ts_min[10](open)` |
+| 3 | ga_g000_0017 | random_init |  | 1.0378 | 0.1511 | 1.51 | 1 | 1 | `volume` |
+| 4 | ga_g000_0075 | random_init |  | 1.0237 | 0.1530 | 1.49 | 3 | 3 | `ts_mean[3](log_abs(volume))` |
+| 5 | ga_g000_0004 | random_init |  | 1.0096 | 0.1236 | 1.55 | 3 | 3 | `ts_std[10](rank(returns))` |
+
+
+## 第 1 代  best=1.0858  mean=0.5912  n_valid=50  archive=18
+- 本代有效个体操作分布：random_init=26 | crossover=11 | random_inject=6 | crossover+mutate=5 | mutate=2
+
+| 排名 | 因子 | 来源 | 变异点 | fitness | rank_ic | IR | depth | complexity | 表达式 |
+|---|---|---|---|---|---|---|---|---|---|
+| 1 | ga_g001_0051 | crossover |  | 1.0858 | -0.1460 | -2.29 | 3 | 3 | `ts_min[10](ts_min[20](open))` |
+| 2 | ga_g001_0000 | random_init |  | 1.0593 | -0.1392 | -2.23 | 2 | 2 | `ts_min[20](open)` |
+| 3 | ga_g001_0001 | random_init |  | 1.0576 | -0.1326 | -2.12 | 2 | 2 | `ts_min[10](open)` |
+| 4 | ga_g001_0002 | random_init |  | 1.0391 | 0.1511 | 1.51 | 1 | 1 | `volume` |
+| 5 | ga_g001_0003 | random_init |  | 1.0246 | 0.1530 | 1.49 | 3 | 3 | `ts_mean[3](log_abs(volume))` |
+
+- **#1 ga_g001_0051**  来源=`crossover`  变异点=`-`
+  - parent[0] = `ts_min[10](open)`
+  - parent[1] = `ts_min[20](open)`
+
+## 第 2 代  best=1.0863  mean=0.6313  n_valid=56  archive=24
+- 本代有效个体操作分布：crossover=24 | random_init=14 | mutate=7 | random_inject=7 | crossover+mutate=4
+
+| 排名 | 因子 | 来源 | 变异点 | fitness | rank_ic | IR | depth | complexity | 表达式 |
+|---|---|---|---|---|---|---|---|---|---|
+| 1 | ga_g002_0045 | crossover |  | 1.0863 | -0.1460 | -2.29 | 4 | 4 | `rank(ts_min[10](ts_min[20](open)))` |
+| 2 | ga_g002_0000 | crossover |  | 1.0857 | -0.1460 | -2.29 | 3 | 3 | `ts_min[10](ts_min[20](open))` |
+| 3 | ga_g002_0001 | random_init |  | 1.0592 | -0.1392 | -2.23 | 2 | 2 | `ts_min[20](open)` |
+| 4 | ga_g002_0002 | random_init |  | 1.0576 | -0.1326 | -2.12 | 2 | 2 | `ts_min[10](open)` |
+| 5 | ga_g002_0039 | mutate | delay | 1.0511 | -0.1268 | -2.23 | 2 | 2 | `delay[20](high)` |
+
+- **#1 ga_g002_0045**  来源=`crossover`  变异点=`-`
+  - parent[0] = `rank(amount)`
+  - parent[1] = `ts_min[10](ts_min[20](open))`
+- **#2 ga_g002_0000**  来源=`crossover`  变异点=`-`
+  - parent[0] = `ts_min[10](open)`
+  - parent[1] = `ts_min[20](open)`
+
+## 第 3 代  best=1.2055  mean=0.7548  n_valid=57  archive=30
+- 本代有效个体操作分布：crossover=31 | random_init=11 | random_inject=9 | crossover+mutate=3 | mutate=3
+
+| 排名 | 因子 | 来源 | 变异点 | fitness | rank_ic | IR | depth | complexity | 表达式 |
+|---|---|---|---|---|---|---|---|---|---|
+| 1 | ga_g003_0064 | crossover |  | 1.2055 | 0.1232 | 2.19 | 4 | 7 | `safe_div(zscore_cs(log_abs(close)),log_abs(delta[10](low)))` |
+| 2 | ga_g003_0057 | crossover |  | 1.1163 | -0.1304 | -2.28 | 4 | 4 | `delay[20](rank(zscore_cs(open)))` |
+| 3 | ga_g003_0046 | crossover |  | 1.1157 | -0.1333 | -2.27 | 4 | 4 | `delay[20](ts_mean[3](ts_min[3](vwap)))` |
+| 4 | ga_g003_0000 | crossover |  | 1.0820 | -0.1460 | -2.29 | 4 | 4 | `rank(ts_min[10](ts_min[20](open)))` |
+| 5 | ga_g003_0001 | crossover |  | 1.0811 | -0.1460 | -2.29 | 3 | 3 | `ts_min[10](ts_min[20](open))` |
+
+- **#1 ga_g003_0064**  来源=`crossover`  变异点=`-`
+  - parent[0] = `safe_div(zscore_cs(log_abs(close)),zscore_cs(low))`
+  - parent[1] = `log_abs(delta[10](low))`
+- **#2 ga_g003_0057**  来源=`crossover`  变异点=`-`
+  - parent[0] = `delay[20](volume)`
+  - parent[1] = `rank(zscore_cs(open))`
+- **#3 ga_g003_0046**  来源=`crossover`  变异点=`-`
+  - parent[0] = `delay[20](ts_mean[3](log_abs(volume)))`
+  - parent[1] = `ts_min[3](vwap)`
+
+## 第 4 代  best=1.2024  mean=0.7887  n_valid=46  archive=33
+- 本代有效个体操作分布：crossover=23 | random_init=11 | crossover+mutate=5 | random_inject=4 | mutate=3
+
+| 排名 | 因子 | 来源 | 变异点 | fitness | rank_ic | IR | depth | complexity | 表达式 |
+|---|---|---|---|---|---|---|---|---|---|
+| 1 | ga_g004_0000 | crossover |  | 1.2024 | 0.1232 | 2.19 | 4 | 7 | `safe_div(zscore_cs(log_abs(close)),log_abs(delta[10](low)))` |
+| 2 | ga_g004_0001 | crossover |  | 1.1127 | -0.1304 | -2.28 | 4 | 4 | `delay[20](rank(zscore_cs(open)))` |
+| 3 | ga_g004_0002 | crossover |  | 1.1122 | -0.1333 | -2.27 | 4 | 4 | `delay[20](ts_mean[3](ts_min[3](vwap)))` |
+| 4 | ga_g004_0003 | crossover |  | 1.0784 | -0.1460 | -2.29 | 4 | 4 | `rank(ts_min[10](ts_min[20](open)))` |
+| 5 | ga_g004_0004 | crossover |  | 1.0775 | -0.1460 | -2.29 | 3 | 3 | `ts_min[10](ts_min[20](open))` |
+
+- **#1 ga_g004_0000**  来源=`crossover`  变异点=`-`
+  - parent[0] = `safe_div(zscore_cs(log_abs(close)),zscore_cs(low))`
+  - parent[1] = `log_abs(delta[10](low))`
+- **#2 ga_g004_0001**  来源=`crossover`  变异点=`-`
+  - parent[0] = `delay[20](volume)`
+  - parent[1] = `rank(zscore_cs(open))`
+- **#3 ga_g004_0002**  来源=`crossover`  变异点=`-`
+  - parent[0] = `delay[20](ts_mean[3](log_abs(volume)))`
+  - parent[1] = `ts_min[3](vwap)`
+
+## 第 5 代  best=1.2009  mean=0.8578  n_valid=45  archive=38
+- 本代有效个体操作分布：crossover=23 | random_init=9 | crossover+mutate=8 | random_inject=4 | mutate=1
+
+| 排名 | 因子 | 来源 | 变异点 | fitness | rank_ic | IR | depth | complexity | 表达式 |
+|---|---|---|---|---|---|---|---|---|---|
+| 1 | ga_g005_0000 | crossover |  | 1.2009 | 0.1232 | 2.19 | 4 | 7 | `safe_div(zscore_cs(log_abs(close)),log_abs(delta[10](low)))` |
+| 2 | ga_g005_0059 | mutate | delay | 1.1212 | -0.1329 | -2.30 | 3 | 3 | `delay[20](ts_mean[3](low))` |
+| 3 | ga_g005_0001 | crossover |  | 1.1101 | -0.1304 | -2.28 | 4 | 4 | `delay[20](rank(zscore_cs(open)))` |
+| 4 | ga_g005_0002 | crossover |  | 1.1092 | -0.1333 | -2.27 | 4 | 4 | `delay[20](ts_mean[3](ts_min[3](vwap)))` |
+| 5 | ga_g005_0003 | crossover |  | 1.0757 | -0.1460 | -2.29 | 4 | 4 | `rank(ts_min[10](ts_min[20](open)))` |
+
+- **#1 ga_g005_0000**  来源=`crossover`  变异点=`-`
+  - parent[0] = `safe_div(zscore_cs(log_abs(close)),zscore_cs(low))`
+  - parent[1] = `log_abs(delta[10](low))`
+- **#2 ga_g005_0059**  来源=`mutate`  变异点=`delay`
+  - parent[0] = `delay[20](ts_mean[3](log_abs(returns)))`
+- **#3 ga_g005_0001**  来源=`crossover`  变异点=`-`
+  - parent[0] = `delay[20](volume)`
+  - parent[1] = `rank(zscore_cs(open))`
+
+## 第 6 代  best=1.1997  mean=0.8584  n_valid=41  archive=42
+- 本代有效个体操作分布：crossover=21 | random_init=8 | random_inject=6 | crossover+mutate=5 | mutate=1
+
+| 排名 | 因子 | 来源 | 变异点 | fitness | rank_ic | IR | depth | complexity | 表达式 |
+|---|---|---|---|---|---|---|---|---|---|
+| 1 | ga_g006_0000 | crossover |  | 1.1997 | 0.1232 | 2.19 | 4 | 7 | `safe_div(zscore_cs(log_abs(close)),log_abs(delta[10](low)))` |
+| 2 | ga_g006_0039 | crossover |  | 1.1203 | -0.1329 | -2.30 | 4 | 4 | `rank(delay[20](ts_mean[3](low)))` |
+| 3 | ga_g006_0001 | mutate | delay | 1.1197 | -0.1329 | -2.30 | 3 | 3 | `delay[20](ts_mean[3](low))` |
+| 4 | ga_g006_0002 | crossover |  | 1.1090 | -0.1304 | -2.28 | 4 | 4 | `delay[20](rank(zscore_cs(open)))` |
+| 5 | ga_g006_0003 | crossover |  | 1.1078 | -0.1333 | -2.27 | 4 | 4 | `delay[20](ts_mean[3](ts_min[3](vwap)))` |
+
+- **#1 ga_g006_0000**  来源=`crossover`  变异点=`-`
+  - parent[0] = `safe_div(zscore_cs(log_abs(close)),zscore_cs(low))`
+  - parent[1] = `log_abs(delta[10](low))`
+- **#2 ga_g006_0039**  来源=`crossover`  变异点=`-`
+  - parent[0] = `rank(volume)`
+  - parent[1] = `delay[20](ts_mean[3](low))`
+- **#3 ga_g006_0001**  来源=`mutate`  变异点=`delay`
+  - parent[0] = `delay[20](ts_mean[3](log_abs(returns)))`
+
+## 第 7 代  best=1.2028  mean=0.7900  n_valid=49  archive=45
+- 本代有效个体操作分布：crossover=23 | crossover+mutate=8 | random_inject=8 | random_init=7 | mutate=3
+
+| 排名 | 因子 | 来源 | 变异点 | fitness | rank_ic | IR | depth | complexity | 表达式 |
+|---|---|---|---|---|---|---|---|---|---|
+| 1 | ga_g007_0000 | crossover |  | 1.2028 | 0.1232 | 2.19 | 4 | 7 | `safe_div(zscore_cs(log_abs(close)),log_abs(delta[10](low)))` |
+| 2 | ga_g007_0001 | crossover |  | 1.1251 | -0.1329 | -2.30 | 4 | 4 | `rank(delay[20](ts_mean[3](low)))` |
+| 3 | ga_g007_0002 | mutate | delay | 1.1250 | -0.1329 | -2.30 | 3 | 3 | `delay[20](ts_mean[3](low))` |
+| 4 | ga_g007_0003 | crossover |  | 1.1138 | -0.1304 | -2.28 | 4 | 4 | `delay[20](rank(zscore_cs(open)))` |
+| 5 | ga_g007_0004 | crossover |  | 1.1131 | -0.1333 | -2.27 | 4 | 4 | `delay[20](ts_mean[3](ts_min[3](vwap)))` |
+
+- **#1 ga_g007_0000**  来源=`crossover`  变异点=`-`
+  - parent[0] = `safe_div(zscore_cs(log_abs(close)),zscore_cs(low))`
+  - parent[1] = `log_abs(delta[10](low))`
+- **#2 ga_g007_0001**  来源=`crossover`  变异点=`-`
+  - parent[0] = `rank(volume)`
+  - parent[1] = `delay[20](ts_mean[3](low))`
+- **#3 ga_g007_0002**  来源=`mutate`  变异点=`delay`
+  - parent[0] = `delay[20](ts_mean[3](log_abs(returns)))`
+
+## 第 8 代  best=1.1995  mean=0.8630  n_valid=44  archive=46
+- 本代有效个体操作分布：crossover=23 | random_inject=7 | random_init=6 | crossover+mutate=5 | mutate=3
+
+| 排名 | 因子 | 来源 | 变异点 | fitness | rank_ic | IR | depth | complexity | 表达式 |
+|---|---|---|---|---|---|---|---|---|---|
+| 1 | ga_g008_0000 | crossover |  | 1.1995 | 0.1232 | 2.19 | 4 | 7 | `safe_div(zscore_cs(log_abs(close)),log_abs(delta[10](low)))` |
+| 2 | ga_g008_0001 | crossover |  | 1.1209 | -0.1329 | -2.30 | 4 | 4 | `rank(delay[20](ts_mean[3](low)))` |
+| 3 | ga_g008_0002 | mutate | delay | 1.1201 | -0.1329 | -2.30 | 3 | 3 | `delay[20](ts_mean[3](low))` |
+| 4 | ga_g008_0042 | crossover |  | 1.1111 | -0.1296 | -2.28 | 2 | 2 | `delay[20](vwap)` |
+| 5 | ga_g008_0003 | crossover |  | 1.1096 | -0.1304 | -2.28 | 4 | 4 | `delay[20](rank(zscore_cs(open)))` |
+
+- **#1 ga_g008_0000**  来源=`crossover`  变异点=`-`
+  - parent[0] = `safe_div(zscore_cs(log_abs(close)),zscore_cs(low))`
+  - parent[1] = `log_abs(delta[10](low))`
+- **#2 ga_g008_0001**  来源=`crossover`  变异点=`-`
+  - parent[0] = `rank(volume)`
+  - parent[1] = `delay[20](ts_mean[3](low))`
+- **#3 ga_g008_0002**  来源=`mutate`  变异点=`delay`
+  - parent[0] = `delay[20](ts_mean[3](log_abs(returns)))`
+
+---
+
+## 🌳 最优 Top 10 因子血缘
+
+
+**[1] ga_g003_0064**  fitness=`1.2055`  
+  expr = `safe_div(zscore_cs(log_abs(close)),log_abs(delta[10](low)))`
+```
+    └─ gen=3 op=crossover parents=2
+        parent[0] = safe_div(zscore_cs(log_abs(close)),zscore_cs(low))
+        └─ gen=2 op=random_inject (root)
+        parent[1] = log_abs(delta[10](low))
+        └─ gen=0 op=random_init (root)
+```
+
+**[2] ga_g007_0001**  fitness=`1.1251`  
+  expr = `rank(delay[20](ts_mean[3](low)))`
+```
+    └─ gen=6 op=crossover parents=2
+        parent[0] = rank(volume)
+        └─ gen=2 op=random_inject (root)
+        parent[1] = delay[20](ts_mean[3](low))
+        └─ gen=5 op=mutate mutate=delay parents=1
+            parent[0] = delay[20](ts_mean[3](log_abs(returns)))
+            └─ gen=3 op=crossover+mutate mutate=delay parents=2
+                parent[0] = open
+                └─ gen=0 op=random_init (root)
+                parent[1] = delay[20](ts_mean[3](log_abs(volume)))
+                └─ gen=2 op=crossover parents=2
+                    parent[0] = delay[20](volume)
+                    └─ gen=1 op=random_inject (root)
+                    parent[1] = ts_mean[3](log_abs(volume))
+                    └─ gen=0 op=random_init (root)
+```
+
+**[3] ga_g007_0002**  fitness=`1.1250`  
+  expr = `delay[20](ts_mean[3](low))`
+```
+    └─ gen=5 op=mutate mutate=delay parents=1
+        parent[0] = delay[20](ts_mean[3](log_abs(returns)))
+        └─ gen=3 op=crossover+mutate mutate=delay parents=2
+            parent[0] = open
+            └─ gen=0 op=random_init (root)
+            parent[1] = delay[20](ts_mean[3](log_abs(volume)))
+            └─ gen=2 op=crossover parents=2
+                parent[0] = delay[20](volume)
+                └─ gen=1 op=random_inject (root)
+                parent[1] = ts_mean[3](log_abs(volume))
+                └─ gen=0 op=random_init (root)
+```
+
+**[4] ga_g003_0057**  fitness=`1.1163`  
+  expr = `delay[20](rank(zscore_cs(open)))`
+```
+    └─ gen=3 op=crossover parents=2
+        parent[0] = delay[20](volume)
+        └─ gen=1 op=random_inject (root)
+        parent[1] = rank(zscore_cs(open))
+        └─ gen=2 op=crossover parents=2
+            parent[0] = rank(amount)
+            └─ gen=0 op=random_init (root)
+            parent[1] = zscore_cs(open)
+            └─ gen=1 op=crossover+mutate mutate=zscore_cs parents=2
+                parent[0] = covariance[60](log_abs(scale(amount)),rank(low))
+                └─ gen=0 op=random_init (root)
+                parent[1] = zscore_cs(returns)
+                └─ gen=0 op=random_init (root)
+```
+
+**[5] ga_g003_0046**  fitness=`1.1157`  
+  expr = `delay[20](ts_mean[3](ts_min[3](vwap)))`
+```
+    └─ gen=3 op=crossover parents=2
+        parent[0] = delay[20](ts_mean[3](log_abs(volume)))
+        └─ gen=2 op=crossover parents=2
+            parent[0] = delay[20](volume)
+            └─ gen=1 op=random_inject (root)
+            parent[1] = ts_mean[3](log_abs(volume))
+            └─ gen=0 op=random_init (root)
+        parent[1] = ts_min[3](vwap)
+        └─ gen=0 op=random_init (root)
+```
+
+**[6] ga_g008_0042**  fitness=`1.1111`  
+  expr = `delay[20](vwap)`
+```
+    └─ gen=8 op=crossover parents=2
+        parent[0] = delay[20](volume)
+        └─ gen=1 op=random_inject (root)
+        parent[1] = vwap
+        └─ gen=0 op=random_init (root)
+```
+
+**[7] ga_g002_0045**  fitness=`1.0863`  
+  expr = `rank(ts_min[10](ts_min[20](open)))`
+```
+    └─ gen=2 op=crossover parents=2
+        parent[0] = rank(amount)
+        └─ gen=0 op=random_init (root)
+        parent[1] = ts_min[10](ts_min[20](open))
+        └─ gen=1 op=crossover parents=2
+            parent[0] = ts_min[10](open)
+            └─ gen=0 op=random_init (root)
+            parent[1] = ts_min[20](open)
+            └─ gen=0 op=random_init (root)
+```
+
+**[8] ga_g001_0051**  fitness=`1.0858`  
+  expr = `ts_min[10](ts_min[20](open))`
+```
+    └─ gen=1 op=crossover parents=2
+        parent[0] = ts_min[10](open)
+        └─ gen=0 op=random_init (root)
+        parent[1] = ts_min[20](open)
+        └─ gen=0 op=random_init (root)
+```
+
+**[9] ga_g003_0032**  fitness=`1.0799`  
+  expr = `ts_min[30](vwap)`
+```
+    └─ gen=3 op=crossover+mutate mutate=ts_min parents=2
+        parent[0] = close
+        └─ gen=0 op=random_init (root)
+        parent[1] = covariance[30](amount,ts_rank[3](log_abs(low)))
+        └─ gen=1 op=crossover parents=2
+            parent[0] = covariance[30](amount,close)
+            └─ gen=0 op=random_init (root)
+            parent[1] = ts_rank[3](log_abs(low))
+            └─ gen=0 op=random_init (root)
+```
+
+**[10] ga_g007_0007**  fitness=`1.0787`  
+  expr = `ts_min[20](ts_min[10](open))`
+```
+    └─ gen=6 op=crossover parents=2
+        parent[0] = ts_min[20](open)
+        └─ gen=0 op=random_init (root)
+        parent[1] = ts_min[10](open)
+        └─ gen=0 op=random_init (root)
+```
+
+## 第 0 代  best=1.0588  mean=0.6243  n_valid=34  archive=15
+- 本代有效个体操作分布：random_init=34
+
+| 排名 | 因子 | 来源 | 变异点 | fitness | rank_ic | IR | depth | complexity | 表达式 |
+|---|---|---|---|---|---|---|---|---|---|
+| 1 | ga_g000_0037 | random_init |  | 1.0588 | -0.1392 | -2.23 | 2 | 2 | `ts_min[20](open)` |
+| 2 | ga_g000_0055 | random_init |  | 1.0572 | -0.1326 | -2.12 | 2 | 2 | `ts_min[10](open)` |
+| 3 | ga_g000_0017 | random_init |  | 1.0378 | 0.1511 | 1.51 | 1 | 1 | `volume` |
+| 4 | ga_g000_0075 | random_init |  | 1.0237 | 0.1530 | 1.49 | 3 | 3 | `ts_mean[3](log_abs(volume))` |
+| 5 | ga_g000_0004 | random_init |  | 1.0096 | 0.1236 | 1.55 | 3 | 3 | `ts_std[10](rank(returns))` |
+
+
+## 第 1 代  best=1.0858  mean=0.5912  n_valid=50  archive=18
+- 本代有效个体操作分布：random_init=26 | crossover=11 | random_inject=6 | crossover+mutate=5 | mutate=2
+
+| 排名 | 因子 | 来源 | 变异点 | fitness | rank_ic | IR | depth | complexity | 表达式 |
+|---|---|---|---|---|---|---|---|---|---|
+| 1 | ga_g001_0051 | crossover |  | 1.0858 | -0.1460 | -2.29 | 3 | 3 | `ts_min[10](ts_min[20](open))` |
+| 2 | ga_g001_0000 | random_init |  | 1.0593 | -0.1392 | -2.23 | 2 | 2 | `ts_min[20](open)` |
+| 3 | ga_g001_0001 | random_init |  | 1.0576 | -0.1326 | -2.12 | 2 | 2 | `ts_min[10](open)` |
+| 4 | ga_g001_0002 | random_init |  | 1.0391 | 0.1511 | 1.51 | 1 | 1 | `volume` |
+| 5 | ga_g001_0003 | random_init |  | 1.0246 | 0.1530 | 1.49 | 3 | 3 | `ts_mean[3](log_abs(volume))` |
+
+- **#1 ga_g001_0051**  来源=`crossover`  变异点=`-`
+  - parent[0] = `ts_min[10](open)`
+  - parent[1] = `ts_min[20](open)`
+
+## 第 0 代  best=1.0588  mean=0.6243  n_valid=34  archive=15
+- 本代有效个体操作分布：random_init=34
+
+| 排名 | 因子 | 来源 | 变异点 | fitness | rank_ic | IR | depth | complexity | 表达式 |
+|---|---|---|---|---|---|---|---|---|---|
+| 1 | ga_g000_0037 | random_init |  | 1.0588 | -0.1392 | -2.23 | 2 | 2 | `ts_min[20](open)` |
+| 2 | ga_g000_0055 | random_init |  | 1.0572 | -0.1326 | -2.12 | 2 | 2 | `ts_min[10](open)` |
+| 3 | ga_g000_0017 | random_init |  | 1.0378 | 0.1511 | 1.51 | 1 | 1 | `volume` |
+| 4 | ga_g000_0075 | random_init |  | 1.0237 | 0.1530 | 1.49 | 3 | 3 | `ts_mean[3](log_abs(volume))` |
+| 5 | ga_g000_0004 | random_init |  | 1.0096 | 0.1236 | 1.55 | 3 | 3 | `ts_std[10](rank(returns))` |
+
+
+## 第 1 代  best=1.0858  mean=0.5912  n_valid=50  archive=18
+- 本代有效个体操作分布：random_init=26 | crossover=11 | random_inject=6 | crossover+mutate=5 | mutate=2
+
+| 排名 | 因子 | 来源 | 变异点 | fitness | rank_ic | IR | depth | complexity | 表达式 |
+|---|---|---|---|---|---|---|---|---|---|
+| 1 | ga_g001_0051 | crossover |  | 1.0858 | -0.1460 | -2.29 | 3 | 3 | `ts_min[10](ts_min[20](open))` |
+| 2 | ga_g001_0000 | random_init |  | 1.0593 | -0.1392 | -2.23 | 2 | 2 | `ts_min[20](open)` |
+| 3 | ga_g001_0001 | random_init |  | 1.0576 | -0.1326 | -2.12 | 2 | 2 | `ts_min[10](open)` |
+| 4 | ga_g001_0002 | random_init |  | 1.0391 | 0.1511 | 1.51 | 1 | 1 | `volume` |
+| 5 | ga_g001_0003 | random_init |  | 1.0246 | 0.1530 | 1.49 | 3 | 3 | `ts_mean[3](log_abs(volume))` |
+
+- **#1 ga_g001_0051**  来源=`crossover`  变异点=`-`
+  - parent[0] = `ts_min[10](open)`
+  - parent[1] = `ts_min[20](open)`

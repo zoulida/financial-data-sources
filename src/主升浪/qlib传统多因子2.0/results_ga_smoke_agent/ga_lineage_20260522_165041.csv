@@ -1,0 +1,3 @@
+﻿generation,factor,expr_key,operation,parents,mutation_op,first_generation,fitness,rank_ic_mean,rank_ic_ir,depth,complexity,survived
+0,ga_g000_0003,low,random_init,,,0,0.07881610351051853,-0.006378336729789631,-0.0524631239819874,1,1,True
+0,ga_g000_0005,close,random_init,,,0,0.07846771590535472,-0.006295209623062962,-0.051799972735894546,1,1,True

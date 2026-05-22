@@ -1,0 +1,10 @@
+# GA Lineage Top 10
+
+
+[1] factor=ga_g000_0003 | fitness=0.0788
+    expr   = low
+    └─ gen=0 op=random_init (root)
+
+[2] factor=ga_g000_0005 | fitness=0.0785
+    expr   = close
+    └─ gen=0 op=random_init (root)

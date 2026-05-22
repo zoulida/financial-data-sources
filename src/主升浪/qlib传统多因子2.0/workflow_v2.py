@@ -79,6 +79,23 @@ CONFIG_FILE = _THIS_DIR / "workflow_v2_config.json"
 LOGGER = logging.getLogger(__name__)
 
 
+def _default_provider_uri() -> str:
+    for base in (_THIS_DIR, *_THIS_DIR.parents):
+        candidate = base / "md" / "qlib数据" / "qlib_data" / "cn_data"
+        if candidate.exists():
+            return str(candidate)
+    return str(_THIS_DIR.parents[2] / "md" / "qlib数据" / "qlib_data" / "cn_data")
+
+
+def _resolve_provider_uri(provider_uri: str) -> str:
+    raw = Path(os.path.expanduser(str(provider_uri))).expanduser()
+    for candidate in (raw, raw / "cn_data"):
+        candidate_str = str(candidate)
+        if exists_qlib_data(candidate_str):
+            return candidate_str
+    return str(raw)
+
+
 # ============================================================================
 # 配置
 # ============================================================================
@@ -87,7 +104,7 @@ LOGGER = logging.getLogger(__name__)
 @dataclass
 class WorkflowConfigV2:
     # ---- 沿用 1.0 ----
-    provider_uri: str = "d:/pythonProject/sdufe-qlib/source/qlib-data数据下载/cn_data"
+    provider_uri: str = field(default_factory=_default_provider_uri)
     market: str = "csi300"
     benchmark: str = "SH000300"
     start_time: str = "2024-11-01"
@@ -168,6 +185,14 @@ def load_saved_config() -> WorkflowConfigV2:
         if "ml_model" in filtered and not isinstance(filtered["ml_model"], list):
             filtered["ml_model"] = [str(filtered["ml_model"])]
         merged = {**asdict(default), **filtered}
+        resolved_provider = _resolve_provider_uri(str(merged.get("provider_uri", "")))
+        if exists_qlib_data(resolved_provider):
+            merged["provider_uri"] = resolved_provider
+        else:
+            fallback_provider = _resolve_provider_uri(default.provider_uri)
+            if exists_qlib_data(fallback_provider):
+                print(f"⚠️ 配置中的 QLib 数据路径不可用，已切换到本项目数据目录: {fallback_provider}")
+                merged["provider_uri"] = fallback_provider
         return WorkflowConfigV2(**merged)
     except Exception as exc:
         print(f"⚠️ 读取上次参数失败，将使用默认参数: {exc}")
@@ -381,7 +406,8 @@ class WorkflowV2:
     # ---- 步骤 1: QLib 初始化 ----
     def _init_qlib(self) -> None:
         print("\n第一步：初始化 QLib 数据环境")
-        provider_uri = os.path.expanduser(self.config.provider_uri)
+        provider_uri = _resolve_provider_uri(self.config.provider_uri)
+        self.config.provider_uri = provider_uri
         if not exists_qlib_data(provider_uri):
             raise FileNotFoundError(f"QLib 数据不存在: {provider_uri}")
         # 重要：在 Windows + 中文目录下，joblib 的默认 multiprocessing 后端
@@ -399,10 +425,19 @@ class WorkflowV2:
     def _load_market_data(self) -> None:
         print("\n第二步：读取股票池行情数据")
         instruments = D.instruments(market=self.config.market)
+        instrument_list = D.list_instruments(
+            instruments=instruments,
+            start_time=self.config.start_time,
+            end_time=self.config.end_time,
+            freq="day",
+            as_list=True,
+        )
+        if not instrument_list:
+            raise ValueError(f"股票池为空: market={self.config.market}")
         base_fields = ["$open", "$high", "$low", "$close", "$volume", "$vwap"]
         try:
             data = D.features(
-                instruments=instruments,
+                instruments=instrument_list,
                 fields=base_fields + ["$amount"],
                 start_time=self.config.start_time,
                 end_time=self.config.end_time,
@@ -413,7 +448,7 @@ class WorkflowV2:
         except Exception as exc:
             print(f"⚠️ 无 $amount 字段（{exc}），将以 close*volume 近似")
             data = D.features(
-                instruments=instruments,
+                instruments=instrument_list,
                 fields=base_fields,
                 start_time=self.config.start_time,
                 end_time=self.config.end_time,
@@ -1648,6 +1683,7 @@ def _coerce_config(payload: Dict[str, Any]) -> WorkflowConfigV2:
                 merged[key] = str(value)
         except (TypeError, ValueError) as exc:
             raise ValueError(f"参数 {key} 无法转为 {target_type.__name__}: {exc}") from exc
+    merged["provider_uri"] = _resolve_provider_uri(str(merged.get("provider_uri", "")))
     return WorkflowConfigV2(**merged)
 
 
@@ -2130,8 +2166,12 @@ init();
 # ============================================================================
 
 
-def main_cli() -> None:
+def main_cli(overrides: Optional[Dict[str, Any]] = None) -> None:
     config = load_saved_config()
+    if overrides:
+        clean_overrides = {k: v for k, v in overrides.items() if v is not None}
+        if clean_overrides:
+            config = _coerce_config({**asdict(config), **clean_overrides})
     save_config(config)
     wf = WorkflowV2(config)
     wf.run()
@@ -2160,8 +2200,23 @@ if __name__ == "__main__":
     parser.add_argument("--cli", action="store_true", help="不启动 Web，直接命令行运行")
     parser.add_argument("--port", type=int, default=7778, help="Web 端口（默认 7778）")
     parser.add_argument("--host", default="127.0.0.1", help="Web 主机（默认 127.0.0.1）")
+    parser.add_argument("--provider-uri", dest="provider_uri", default=None, help="QLib 数据目录")
+    parser.add_argument("--market", default=None, help="股票池，例如 all/csi300/csi500")
+    parser.add_argument("--start-time", dest="start_time", default=None, help="开始日期")
+    parser.add_argument("--end-time", dest="end_time", default=None, help="结束日期")
+    parser.add_argument("--factor-libraries", dest="factor_libraries", default=None, help="因子库，逗号分隔")
+    parser.add_argument("--output-dir", dest="output_dir", default=None, help="输出目录")
     args = parser.parse_args()
     if args.cli:
-        main_cli()
+        main_cli(
+            {
+                "provider_uri": args.provider_uri,
+                "market": args.market,
+                "start_time": args.start_time,
+                "end_time": args.end_time,
+                "factor_libraries": args.factor_libraries,
+                "output_dir": args.output_dir,
+            }
+        )
     else:
         main_web(args.host, args.port)

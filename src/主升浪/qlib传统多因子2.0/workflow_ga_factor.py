@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import importlib.util
 import io
 import json
@@ -38,7 +39,7 @@ if str(_SOURCE_DIR) not in sys.path:
     sys.path.insert(0, str(_SOURCE_DIR))
 
 import factor_filter  # noqa: E402
-from workflow_v2 import WorkflowConfigV2, WorkflowV2  # noqa: E402
+from workflow_v2 import WorkflowConfigV2, WorkflowV2, _resolve_provider_uri  # noqa: E402
 
 try:
     from flask import Flask, jsonify, request, send_from_directory
@@ -58,6 +59,19 @@ CUSTOM_DIR = _custom_factor_loader.CUSTOM_DIR
 
 CONFIG_FILE = _THIS_DIR / "workflow_ga_factor_config.json"
 V2_CONFIG_FILE = _THIS_DIR / "workflow_v2_config.json"
+
+
+def _normalize_config_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
+    normalized = dict(payload)
+    if "provider_uri" in normalized:
+        normalized["provider_uri"] = _resolve_provider_uri(str(normalized["provider_uri"]))
+    for key in ("factor_libraries", "ml_model", "window_choices", "factor_profile_past_windows"):
+        if key in normalized and not isinstance(normalized[key], list):
+            normalized[key] = [x.strip() for x in str(normalized[key]).split(",") if x.strip()]
+    for key in ("window_choices", "factor_profile_past_windows"):
+        if key in normalized:
+            normalized[key] = [int(x) for x in normalized[key]]
+    return normalized
 
 
 @dataclass
@@ -94,12 +108,8 @@ def load_saved_config() -> WorkflowGAFactorConfig:
         raw = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
         valid = set(asdict(default).keys())
         filtered = {k: v for k, v in raw.items() if k in valid and v not in ("", None)}
-        for key in ("factor_libraries", "ml_model", "window_choices"):
-            if key in filtered and not isinstance(filtered[key], list):
-                filtered[key] = [x.strip() for x in str(filtered[key]).split(",") if x.strip()]
-        if "window_choices" in filtered:
-            filtered["window_choices"] = [int(x) for x in filtered["window_choices"]]
-        return WorkflowGAFactorConfig(**{**asdict(_build_initial_config(default)), **filtered})
+        merged = {**asdict(_build_initial_config(default)), **_normalize_config_payload(filtered)}
+        return WorkflowGAFactorConfig(**merged)
     except Exception as exc:
         print(f"⚠️ 读取 GA 配置失败，将使用默认参数: {exc}")
         return _build_initial_config(default)
@@ -139,7 +149,7 @@ def _build_initial_config(default: WorkflowGAFactorConfig) -> WorkflowGAFactorCo
             "export_prefix": "ga",
         }
     )
-    return WorkflowGAFactorConfig(**base)
+    return WorkflowGAFactorConfig(**_normalize_config_payload(base))
 
 
 def save_config(config: WorkflowGAFactorConfig) -> None:
@@ -968,9 +978,33 @@ class WorkflowGAFactor(WorkflowV2):
         rows: List[Dict[str, Any]] = []
         CUSTOM_DIR.mkdir(parents=True, exist_ok=True)
         used_names: set[str] = set()
+        existing_by_expr: Dict[str, Path] = {}
+        for path in CUSTOM_DIR.glob("compute_*.py"):
+            try:
+                text = path.read_text(encoding="utf-8")
+            except Exception:
+                continue
+            for line in text.splitlines()[:20]:
+                if line.startswith("# ga_expr_key:"):
+                    existing_by_expr[line.split(":", 1)[1].strip()] = path
+                    break
         for idx, factor_name in enumerate(selected, start=1):
             expr = self._expr_by_name.get(factor_name)
             if expr is None:
+                continue
+            expr_key = expr.key()
+            existing_path = existing_by_expr.get(expr_key)
+            if existing_path is not None and existing_path.exists():
+                rows.append(
+                    {
+                        "factor": factor_name,
+                        "function": existing_path.stem,
+                        "path": str(existing_path),
+                        "expression": expr_key,
+                        "status": "duplicate_reused",
+                    }
+                )
+                print(f"  ♻️ 已存在相同 GA 因子，复用: {existing_path.name}")
                 continue
             fields = expr.fields()
             if "close" not in fields:
@@ -986,16 +1020,19 @@ class WorkflowGAFactor(WorkflowV2):
                 "returns": "returns_df",
             }
             params = [param_map[x] for x in fields if x in param_map]
-            func_name = f"compute_{self.config.export_prefix}_{int(time.time())}_{idx:03d}"
+            expr_hash = hashlib.md5(expr_key.encode("utf-8")).hexdigest()[:12]
+            func_name = f"compute_{self.config.export_prefix}_{expr_hash}"
             while func_name in used_names or (CUSTOM_DIR / f"{func_name}.py").exists():
                 idx += 1
-                func_name = f"compute_{self.config.export_prefix}_{int(time.time())}_{idx:03d}"
+                func_name = f"compute_{self.config.export_prefix}_{expr_hash}_{idx:03d}"
             used_names.add(func_name)
             code_expr = expr.to_code(param_map)
             source = (
                 "from __future__ import annotations\n\n"
                 "import numpy as np\n"
                 "import pandas as pd\n\n\n"
+                f"# ga_expr_key: {expr_key}\n"
+                f"# ga_expr_hash: {expr_hash}\n"
                 f"def {func_name}({', '.join(params)}) -> pd.DataFrame:\n"
                 f"    result = {code_expr}\n"
                 "    return result.astype(float).replace([np.inf, -np.inf], np.nan)\n"
@@ -1006,7 +1043,8 @@ class WorkflowGAFactor(WorkflowV2):
                 continue
             target = CUSTOM_DIR / f"{func_name}.py"
             target.write_text(source, encoding="utf-8")
-            rows.append({"factor": factor_name, "function": func_name, "path": str(target), "expression": expr.key()})
+            existing_by_expr[expr_key] = target
+            rows.append({"factor": factor_name, "function": func_name, "path": str(target), "expression": expr_key, "status": "exported"})
             print(f"  💾 已导出 GA 因子: {target.name}")
         return pd.DataFrame(rows)
 
@@ -1155,7 +1193,7 @@ def _json_safe(value: Any) -> Any:
 
 def _run_background(config: WorkflowGAFactorConfig) -> None:
     with _RUN_LOCK:
-        _RUN_STATE.update({"running": True, "logs": [], "last_results": None, "error": None, "start_time": time.strftime("%Y-%m-%d %H:%M:%S"), "end_time": None})
+        _RUN_STATE.update({"running": True, "last_results": None, "error": None, "end_time": None})
     tee = _LogTee(sys.stdout)
     try:
         with redirect_stdout(tee):
@@ -1231,6 +1269,7 @@ def _merge_config(payload: Dict[str, Any]) -> WorkflowGAFactorConfig:
                 merged[key] = str(value)
         except Exception:
             continue
+    merged = _normalize_config_payload(merged)
     return WorkflowGAFactorConfig(**merged)
 
 
@@ -1264,8 +1303,16 @@ def _build_flask_app() -> Any:
         with _RUN_LOCK:
             if _RUN_STATE["running"]:
                 return jsonify({"ok": False, "error": "已有 GA 任务运行中"}), 409
-        cfg = _merge_config(request.get_json(silent=True) or {})
-        save_config(cfg)
+            _RUN_STATE.update({"running": True, "logs": [], "last_results": None, "error": None, "start_time": time.strftime("%Y-%m-%d %H:%M:%S"), "end_time": None})
+        try:
+            cfg = _merge_config(request.get_json(silent=True) or {})
+            save_config(cfg)
+        except Exception as exc:
+            with _RUN_LOCK:
+                _RUN_STATE["running"] = False
+                _RUN_STATE["error"] = f"{type(exc).__name__}: {exc}"
+                _RUN_STATE["end_time"] = time.strftime("%Y-%m-%d %H:%M:%S")
+            return jsonify({"ok": False, "error": f"{type(exc).__name__}: {exc}"}), 400
         threading.Thread(target=_run_background, args=(cfg,), daemon=True).start()
         return jsonify({"ok": True, "config": asdict(cfg)})
 
@@ -1283,8 +1330,12 @@ def _build_flask_app() -> Any:
     return app
 
 
-def main_cli() -> None:
+def main_cli(overrides: Optional[Dict[str, Any]] = None) -> None:
     cfg = load_saved_config()
+    if overrides:
+        clean_overrides = {k: v for k, v in overrides.items() if v is not None}
+        if clean_overrides:
+            cfg = _merge_config({**asdict(cfg), **clean_overrides})
     save_config(cfg)
     WorkflowGAFactor(cfg).run()
 
@@ -1302,8 +1353,25 @@ if __name__ == "__main__":
     parser.add_argument("--cli", action="store_true", help="不启动 Web，直接命令行运行")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8001)
+    parser.add_argument("--provider-uri", dest="provider_uri", default=None, help="QLib 数据目录")
+    parser.add_argument("--market", default=None, help="股票池，例如 all/csi300/csi500")
+    parser.add_argument("--start-time", dest="start_time", default=None, help="开始日期")
+    parser.add_argument("--end-time", dest="end_time", default=None, help="结束日期")
+    parser.add_argument("--population-size", dest="population_size", type=int, default=None, help="GA 种群规模")
+    parser.add_argument("--generations", type=int, default=None, help="GA 进化代数")
+    parser.add_argument("--output-dir", dest="output_dir", default=None, help="输出目录")
     args = parser.parse_args()
     if args.cli:
-        main_cli()
+        main_cli(
+            {
+                "provider_uri": args.provider_uri,
+                "market": args.market,
+                "start_time": args.start_time,
+                "end_time": args.end_time,
+                "population_size": args.population_size,
+                "generations": args.generations,
+                "output_dir": args.output_dir,
+            }
+        )
     else:
         main_web(args.host, args.port)

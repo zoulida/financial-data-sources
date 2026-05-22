@@ -1,0 +1,2 @@
+﻿generation,n_evaluated,n_unique_expr,depth_mean,complexity_mean,fitness_std,fitness_max,fitness_mean,op_random_init,op_random_inject,op_random_restart,op_elite,op_crossover,op_mutate,op_crossover_mutate,op_reproduction
+0,2,2,1.0,1.0,0.000246347238092674,0.07881610351051853,0.07864190970793662,2,0,0,0,0,0,0,0

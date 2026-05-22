@@ -130,7 +130,7 @@ const statusEl = document.getElementById('status');
 const logsEl = document.getElementById('logs');
 const resultsEl = document.getElementById('results');
 const DEFAULT_CONFIG = {
-  provider_uri: 'd:/pythonProject/sdufe-qlib/source/qlib-data数据下载/cn_data',
+  provider_uri: 'd:/pythonProject/数据源/md/qlib数据/qlib_data/cn_data',
   market: 'all',
   benchmark: 'SH000300',
   start_time: '2024-11-01',
