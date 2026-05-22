@@ -1,0 +1,31 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Create GitHub Release
+    runs-on: ubuntu-slim
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Generate release notes
+        id: release_notes
+        uses: octivi/release-notes-from-changelog@v1
+        with:
+          tag: ${{ github.ref_name }}
+          changelog: CHANGELOG.md
+          release_notes: release-notes.md
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          body_path: ${{ steps.release_notes.outputs.release_notes }}
+          generate_release_notes: false

@@ -1,0 +1,650 @@
+from opentdx.client.macStandardClient import MacStandardClient as macQuotationClient
+from opentdx.const import ADJUST, BOARD_TYPE, CATEGORY, EX_BOARD_TYPE, EX_MARKET, FILTER_TYPE, MARKET, PERIOD, SORT_TYPE, SORT_ORDER
+import pandas as pd
+from opentdx.utils.help import industry_to_board_symbol, ah_code_to_symbol, lot_size_to_symbol
+from datetime import time
+from opentdx.utils.bitmap import FIELD_BITMAP_MAP, FieldBit, PresetField
+
+class TestMacQuotationClientLogin:
+    """登录"""
+
+    def test_connected(self, mqc):
+        assert mqc.connected is True
+
+class TestMacQuotationClientStock:
+    """股票市场 API"""
+    def test_get_market_monitor(self, mqc:macQuotationClient):
+        result = mqc.get_market_monitor(MARKET.SH)
+        assert isinstance(result, list)
+        if result:
+            assert 'code' in result[0] and 'desc' in result[0]
+
+class TestMacQuotationClientBoard:
+    """板块 API"""
+
+    def test_get_board_count(self, mqc):
+        result = mqc.get_board_count(BOARD_TYPE.HY)
+        assert isinstance(result, int)
+        assert result > 0
+
+    def test_get_board_list(self, mqc):
+        result = mqc.get_board_list(BOARD_TYPE.HY, count=5)
+        assert isinstance(result, list)
+        assert len(result) > 0
+        
+    def test_ex_get_board_list(self, meqc):
+        result = meqc.get_board_list(EX_BOARD_TYPE.HK_ALL, count=5)
+        assert isinstance(result, list)
+        assert len(result) > 0
+
+    def test_get_board_members_quotes(self, mqc):
+        result = mqc.get_board_members_quotes('880761', count=5)
+        assert isinstance(result, list)
+        assert len(result) > 0
+        assert 'code' in result[0]
+
+    def test_get_board_members(self, mqc):
+        # 普通板块
+        result = mqc.get_board_members('880761', count=5)
+        assert isinstance(result, list)
+        assert len(result) > 0
+        
+        # 指数成分股 000xxx
+        result = mqc.get_board_members('000903', count=5)
+        assert isinstance(result, list)
+        assert len(result) > 0
+        
+        # 指数成分股 399xxx
+        result = mqc.get_board_members('399262', count=5)
+        assert isinstance(result, list)
+        assert len(result) > 0
+        
+        # 北证成分股 899xxx
+        result = mqc.get_board_members('899601', count=5)
+        assert isinstance(result, list)
+        assert len(result) > 0
+        
+        
+    def test_exclude_bj_consistency(self, mqc):
+        total_a = mqc.count_board_members(CATEGORY.A)['total']
+        total_a_ex_bj = mqc.count_board_members(CATEGORY.A, exclude_flags=[FILTER_TYPE.BJ])['total']
+        total_bj = mqc.count_board_members(CATEGORY.BJ)['total']
+        assert total_a - total_a_ex_bj == total_bj, \
+            f"A股{total_a} - 排除北证{total_a_ex_bj} = {total_a - total_a_ex_bj} != 北证{total_bj}"
+
+    def test_exclude_kc_consistency(self, mqc):
+        total_a = mqc.count_board_members(CATEGORY.A)['total']
+        total_a_ex_kc = mqc.count_board_members(CATEGORY.A, exclude_flags=[FILTER_TYPE.KC])['total']
+        total_kcb = mqc.count_board_members(CATEGORY.KCB)['total']
+        assert total_a - total_a_ex_kc == total_kcb, \
+            f"A股{total_a} - 排除科创板{total_a_ex_kc} = {total_a - total_a_ex_kc} != 科创板{total_kcb}"
+
+    def test_get_board_members_hkboard(self, meqc):
+        result = meqc.get_board_members('HK0287', count=5)
+        assert isinstance(result, list)
+        assert len(result) > 0
+        
+    def test_get_board_members_usboard(self, meqc):
+        result = meqc.get_board_members('US0495', count=5)
+        assert isinstance(result, list)
+        assert len(result) > 0
+
+    def test_get_board_members_with_sort_type(self, mqc):
+        """测试 sort_type 和 sort_order 参数是否生效"""
+        board_code = '880761'
+        count = 10
+
+        # 测试按成交量降序排序 (默认通常是降序，但显式指定更稳妥)
+        result_desc = mqc.get_board_members_quotes(board_code, count=count, sort_type=SORT_TYPE.VOLUME, sort_order=SORT_ORDER.DESC)
+        assert isinstance(result_desc, list)
+        assert len(result_desc) > 1, "返回数据不足以进行排序验证"
+
+        vols_desc = [item.get('vol', 0) for item in result_desc if isinstance(item, dict)]
+        assert len(vols_desc) == len(result_desc), "部分数据缺失 vol 字段"
+        
+        # 检查是否是降序排列 (从大到小)
+        for i in range(len(vols_desc) - 1):
+            assert vols_desc[i] >= vols_desc[i+1], f"降序排序错误: 索引 {i} 的 vol ({vols_desc[i]}) 小于 索引 {i+1} 的 vol ({vols_desc[i+1]})"
+
+        # 测试按成交量升序排序
+        result_asc = mqc.get_board_members_quotes(board_code, count=count, sort_type=SORT_TYPE.VOLUME, sort_order=SORT_ORDER.ASC)
+        assert isinstance(result_asc, list)
+        assert len(result_asc) > 1, "返回数据不足以进行排序验证"
+
+        vols_asc = [item.get('vol', 0) for item in result_asc if isinstance(item, dict)]
+        assert len(vols_asc) == len(result_asc), "部分数据缺失 vol 字段"
+
+        # 检查是否是升序排列 (从小到大)
+        for i in range(len(vols_asc) - 1):
+            assert vols_asc[i] <= vols_asc[i+1], f"升序排序错误: 索引 {i} 的 vol ({vols_asc[i]}) 大于 索引 {i+1} 的 vol ({vols_asc[i+1]})"
+
+
+    def test_get_symbol_zjlx(self, mqc):
+        result = mqc.get_symbol_zjlx('000100', MARKET.SZ)
+        assert result is not None
+        
+    def test_get_symbol_zjlx_not_support_ex_market(self, mqc):
+        """测试资金流向不支持扩展市场（EX_MARKET）
+        
+        可能的行为：
+        1. 抛出 TypeError 异常
+        2. 返回 None
+        """
+        import pytest
+        try:
+            result = mqc.get_symbol_zjlx('000100', EX_MARKET.US_STOCK)
+            # 如果没有抛出异常，应该返回 None
+            assert result is None, f"期望返回 None，但实际返回: {type(result).__name__}"
+        except TypeError as e:
+            # 如果抛出 TypeError，验证错误信息
+            assert "market 参数必须为 MARKET 类型" in str(e) or "MARKET" in str(e)
+
+    def test_get_symbol_belong_board(self, mqc):
+        result = mqc.get_symbol_belong_board('000100', MARKET.SZ)
+        assert result is not None
+
+    def test_get_symbol_bars(self, mqc):
+        result = mqc.get_symbol_bars(MARKET.SZ, '000100', PERIOD.DAILY, count=5)
+        assert isinstance(result, list)
+        assert len(result) == 5
+        for k in result:
+            assert 'datetime' in k and 'open' in k and 'close' in k
+            assert k['high'] >= k['low']
+
+    def test_get_symbol_bars_with_adjust(self, mqc):
+        qfq = mqc.get_symbol_bars(MARKET.SZ, '000100', PERIOD.DAILY, count=5, fq=ADJUST.QFQ)
+        hfq = mqc.get_symbol_bars(MARKET.SZ, '000100', PERIOD.DAILY, count=5, fq=ADJUST.HFQ)
+        assert len(qfq) == len(hfq)
+        assert qfq[-1]['close'] != hfq[-1]['close'] or qfq[-1]['open'] != hfq[-1]['open']
+
+    def test_get_board_list_ex_board_type(self, mqc):
+        result = mqc.get_board_list(EX_BOARD_TYPE.HK_ALL, count=5)
+        assert result is None or isinstance(result, list)
+
+
+class TestMacQuotationClientBoardFields:
+    """板块 API f"""
+
+    def test_base_info(self, mqc:macQuotationClient):
+        rs = mqc.get_board_members_quotes(board_symbol="881394",count=300, fields=PresetField.BASIC)
+        df = pd.DataFrame(rs)
+
+        for field in PresetField.BASIC.value:
+            filed_name = field.field_name
+            assert filed_name in df.columns, f"字段 {field} {filed_name} 不在返回数据中"
+
+    def test_list_fields(self, mqc:macQuotationClient):
+        category = CATEGORY.A
+        fields = [FieldBit.PRE_CLOSE, FieldBit.OPEN, FieldBit.HIGH, FieldBit.LOW, FieldBit.CLOSE, FieldBit.VOL, FieldBit.AMOUNT, FieldBit.AH_CODE, FieldBit.LOT_SIZE, FieldBit.INDUSTRY]
+        rs = mqc.get_board_members_quotes(board_symbol=category,count=300, fields=fields)
+        df = pd.DataFrame(rs)
+
+        for field in fields:
+            field_info = FIELD_BITMAP_MAP.get(field)
+            filed_name = field_info[0]
+            assert filed_name in df.columns, f"字段 {field} {filed_name} 不在返回数据中"
+
+
+class TestMacQuotationClientExchange:
+    """板块 API 通过help转换 symbol"""
+
+    def test_exchange_ah_code(self, mqc):
+        fields = [FieldBit.OPEN, FieldBit.HIGH, FieldBit.LOW, FieldBit.CLOSE, FieldBit.VOL, FieldBit.AH_CODE, FieldBit.LOT_SIZE]
+        rs = mqc.get_board_members_quotes(board_symbol="881394",count=300, fields=fields)
+        df = pd.DataFrame(rs)
+        
+        if 'ah_code' in df.columns:  # 正确的检查列是否存在的方式
+            df['ah_code'] = df.apply(lambda row: ah_code_to_symbol(row['ah_code'], row['market']), axis=1)
+
+
+        # 新增验证逻辑
+        assert df is not None and not df.empty, "获取的数据为空"
+        
+        # 筛选 code 为 601066 的行
+        ah_df = df[df['code'] == '601066']
+        
+        # 确保找到了该股票
+        assert not ah_df.empty, "未找到 symbol 为 601066 的股票数据"
+        
+        # 获取第一行的 ah_code 并验证
+        target_ah_code = ah_df.iloc[0]['ah_code']
+        assert target_ah_code == '06066', f"期望 ah_code 为 '06066'，实际为 '{target_ah_code}'"
+        
+
+    def test_exchange_dq_symbol(self, mqc):
+        fields = [FieldBit.OPEN, FieldBit.HIGH, FieldBit.LOW, FieldBit.CLOSE, FieldBit.VOL, FieldBit.AH_CODE, FieldBit.LOT_SIZE]
+
+        rs = mqc.get_board_members_quotes(board_symbol="881394", count=100, fields=fields)
+        df = pd.DataFrame(rs)
+        
+        if 'lot_size' in df.columns:  # 正确的检查列是否存在的方式
+            df['dq_symbol'] = df.apply(lambda row: lot_size_to_symbol(row['lot_size']), axis=1)
+            
+        # 新增验证逻辑
+        assert df is not None and not df.empty, "获取的数据为空"
+        
+        # 验证 000166 的 dq_symbol
+        df_000166 = df[df['code'] == '000166']
+        assert not df_000166.empty, "未找到 code 为 000166 的股票数据"
+        target_dq_symbol_166 = df_000166.iloc[0]['dq_symbol']
+        assert target_dq_symbol_166 == '880202', f"期望 000166 的 dq_symbol 为 '880202'，实际为 '{target_dq_symbol_166}'"
+
+        # 验证 600999 的 dq_symbol
+        df_600999 = df[df['code'] == '600999']
+        assert not df_600999.empty, "未找到 code 为 600999 的股票数据"
+        target_dq_symbol_999 = df_600999.iloc[0]['dq_symbol']
+        assert target_dq_symbol_999 == '880218', f"期望 600999 的 dq_symbol 为 '880218'，实际为 '{target_dq_symbol_999}'"
+        
+
+    def test_exchange_industry_symbol(self, mqc):
+        rs = mqc.get_board_members_quotes(board_symbol="880201", count=100, fields=[FieldBit.INDUSTRY])
+        df = pd.DataFrame(rs)
+
+        if 'industry' in df.columns:  # 正确的检查列是否存在的方式
+            df['industry_symbol'] = df['industry'].apply(lambda x: industry_to_board_symbol(x))
+        
+        # 新增验证逻辑
+        assert df is not None and not df.empty, "获取的数据为空"
+        
+        # 验证 000166 的 dq_symbol
+        df_300900 = df[df['code'] == '300900']
+        assert not df_300900.empty, "未找到 code 为 300900 的股票数据"
+        target = df_300900.iloc[0]['industry_symbol']
+        assert target == '881288', f"期望 300900 的 dq_symbol 为 '881288'，实际为 '{target}'"
+
+
+class TestMacQuotationClientTickChart:
+    """分时图 API - 真实请求测试"""
+        
+    def test_get_symbol_tick_chart_stock_basic(self, mqc):
+        """测试A股基本分时图数据获取"""
+        result = mqc.get_symbol_tick_chart(MARKET.SZ, '000001')
+        
+        # 验证返回数据类型
+        assert isinstance(result, dict), f"返回类型应为dict，实际为 {type(result)}"
+        
+        # 验证必需字段存在
+        required_fields = [
+            'market', 'code', 'name', 'decimal', 'category', 'vol_unit',
+            'time', 'pre_close', 'open', 'high', 'low', 'close',
+            'momentum', 'vol', 'amount', 'turnover', 'avg',
+            'industry', 'charts'
+        ]
+        
+        for field in required_fields:
+            assert field in result, f"缺少必需字段: {field}"
+        
+        # 验证基本信息正确性
+        assert result['code'] == '000001', f"股票代码错误: {result['code']}"
+        assert result['market'] == MARKET.SZ, f"市场代码错误: {result['market']}"
+        assert isinstance(result['name'], str) and len(result['name']) > 0, "股票名称不能为空"
+        
+        # 验证价格字段合理性
+        assert result['pre_close'] > 0, f"昨收价应大于0: {result['pre_close']}"
+        assert result['open'] >= 0, f"开盘价应>=0: {result['open']}"
+        assert result['high'] >= 0, f"最高价应>=0: {result['high']}"
+        assert result['low'] >= 0, f"最低价应>=0: {result['low']}"
+        assert result['close'] >= 0, f"收盘价应>=0: {result['close']}"
+        
+        # 验证高低价格逻辑
+        if result['high'] > 0 and result['low'] > 0:
+            assert result['high'] >= result['low'], \
+                f"最高价({result['high']})应>=最低价({result['low']})"
+        
+        # 验证成交量和成交额
+        assert result['vol'] >= 0, f"成交量应>=0: {result['vol']}"
+        assert result['amount'] >= 0, f"成交额应>=0: {result['amount']}"
+        
+        # 验证分时图数据
+        assert isinstance(result['charts'], list), "chart_data应为列表"
+        if len(result['charts']) > 0:
+            # 验证分时图数据结构
+            first_point = result['charts'][0]
+            assert 'time' in first_point, "分时图数据点缺少time字段"
+            assert 'price' in first_point, "分时图数据点缺少price字段"
+            assert 'avg' in first_point, "分时图数据点缺少avg字段"
+            assert 'vol' in first_point, "分时图数据点缺少vol字段"
+            assert 'momentum' in first_point, "分时图数据点缺少momentum字段"
+
+    def test_get_symbol_tick_chart_with_date(self, mqc):
+        """测试指定日期的历史分时图数据"""
+        from datetime import date
+        
+        # 使用一个最近的交易日（需要根据实际情况调整）
+        query_date = date(2024, 1, 15)
+        result = mqc.get_symbol_tick_chart(MARKET.SH, '600000', query_date)
+        
+        # 验证返回数据类型
+        assert isinstance(result, dict), f"返回类型应为dict，实际为 {type(result)}"
+        
+        # 验证基本信息
+        assert result['code'] == '600000', f"股票代码错误: {result['code']}"
+        assert result['market'] == MARKET.SH, f"市场代码错误: {result['market']}"
+        
+        # 验证时间字段（历史数据应该有具体的时间戳）
+        assert result['time'] is not None, "历史数据的时间戳不应为None"
+        
+        # 验证日期是否正确
+        if result['time']:
+            result_date = result['time'].date()
+            assert result_date == query_date, \
+                f"返回数据日期({result_date})与查询日期({query_date})不一致"
+        
+        # 验证价格数据有效性
+        assert result['pre_close'] > 0, f"昨收价应大于0: {result['pre_close']}"
+        assert result['close'] >= 0, f"收盘价应>=0: {result['close']}"
+        
+        # 历史数据的charts可能为空或包含数据
+        assert isinstance(result['charts'], list), "charts应为列表"
+
+    def test_get_symbol_tick_chart_invalid_date(self, mqc):
+        """测试无效日期的处理"""
+        from datetime import date
+        
+        # 测试未来日期（应该返回空数据或特定错误）
+        future_date = date(2030, 12, 31)
+        result = mqc.get_symbol_tick_chart(MARKET.SZ, '000001', future_date)
+        
+        # 验证返回类型仍然正确
+        assert isinstance(result, dict), "即使日期无效，也应返回字典类型"
+        
+        # 未来日期可能返回空数据或部分字段为空
+        # 这里主要验证不会抛出异常
+        assert result is not None, "返回值不应为None"
+
+    def test_get_symbol_tick_chart_weekend_date(self, mqc):
+        """测试周末日期的处理"""
+        from datetime import date
+        
+        # 2024-01-13 是星期六
+        weekend_date = date(2024, 1, 13)
+        result = mqc.get_symbol_tick_chart(MARKET.SH, '600000', weekend_date)
+        
+        # 验证返回类型
+        assert isinstance(result, dict), "周末日期查询应返回字典类型"
+        
+        # 周末无交易数据，但不应抛出异常
+        assert result is not None, "周末查询返回值不应为None"
+
+    def test_get_symbol_tick_chart_hk_stock(self, meqc):
+        """测试港股分时图数据获取"""
+        # 使用港股主板市场
+        result = meqc.get_symbol_tick_chart(EX_MARKET.HK_MAIN_BOARD, '00700')
+        
+        # 验证返回数据类型
+        assert isinstance(result, dict), f"返回类型应为dict，实际为 {type(result)}"
+        
+        assert isinstance(result['charts'], list), f" result['charts'] 返回类型应为list，实际为 {type(result['charts'])}"
+
+
+    def test_get_symbol_tick_chart_hk_with_date(self, meqc):
+        """测试港股历史分时图数据"""
+        from datetime import date
+        
+        # 使用一个最近的交易日
+        query_date = date(2024, 1, 15)
+        result = meqc.get_symbol_tick_chart(EX_MARKET.HK_MAIN_BOARD, '00700', query_date)
+        
+        # 港股历史数据可能返回None（取决于服务器支持情况）
+        # 这里主要验证不会抛出异常
+        if result is not None:
+            # 如果返回数据，验证其结构
+            assert isinstance(result, dict), f"返回类型应为dict，实际为 {type(result)}"
+            
+            # 验证基本信息
+            assert result['code'] == '00700', f"港股代码错误: {result['code']}"
+            assert result['market'] == EX_MARKET.HK_MAIN_BOARD.value, \
+                f"港股市场代码错误: {result['market']}"
+            
+            # 验证时间字段
+            if result['time']:
+                result_date = result['time'].date()
+                # 港股历史数据日期应与查询日期一致
+                assert result_date == query_date, \
+                    f"港股返回数据日期({result_date})与查询日期({query_date})不一致"
+            
+            # 验证价格数据
+            assert result['pre_close'] > 0, f"港股昨收价应大于0: {result['pre_close']}"
+        else:
+            # 如果返回None，说明服务器不支持该日期的历史数据，这也是可接受的
+            pass
+
+    def test_get_symbol_tick_chart_chart_data_structure(self, mqc):
+        """测试分时图数据结构的完整性"""
+        result = mqc.get_symbol_tick_chart(MARKET.SZ, '000001')
+        
+        # 验证chart_data是列表
+        assert isinstance(result['charts'], list), "chart_data必须是列表类型"
+        
+        # 如果有分时数据，验证每个数据点的结构
+        if len(result['charts']) > 0:
+            for i, point in enumerate(result['charts']):
+                assert isinstance(point, dict), f"第{i}个分时数据点应为字典类型"
+                
+                # 验证必需字段
+                assert 'time' in point, f"第{i}个分时数据点缺少time字段"
+                assert 'price' in point, f"第{i}个分时数据点缺少price字段"
+                assert 'avg' in point, f"第{i}个分时数据点缺少avg字段"
+                assert 'vol' in point, f"第{i}个分时数据点缺少vol字段"
+                assert 'momentum' in point, f"第{i}个分时数据点缺少momentum字段"
+                
+                # 验证字段类型
+                assert point['price'] >= 0, f"第{i}个数据点价格应>=0"
+                assert point['avg'] >= 0, f"第{i}个数据点均价应>=0"
+                assert point['vol'] >= 0, f"第{i}个数据点成交量应>=0"
+                
+                # time字段应该是datetime.time类型
+                from datetime import time as time_type
+                assert isinstance(point['time'], time_type), \
+                    f"第{i}个数据点time字段应为time类型，实际为{type(point['time'])}"
+
+
+class TestMacQuotationClientSymbolQuotes:
+    def test_get_symbol_quotes_with_basic_fields(self, mqc:macQuotationClient):
+        """测试使用 basic 字段预设获取股票行情"""
+        code_list = [
+            (MARKET.SZ, '000001'),
+            (MARKET.SH, '600000'),
+        ]
+        
+        result = mqc.get_symbol_quotes(code_list, fields=PresetField.BASIC)
+        
+        # 验证返回结构
+        assert isinstance(result, dict), f"返回类型应为dict，实际为{type(result)}"
+        assert "count" in result, "返回值应包含count字段"
+        assert "stocks" in result, "返回值应包含stocks字段"
+        assert result["count"] == len(code_list), f"返回数量应与请求数量一致"
+        assert len(result["stocks"]) == len(code_list), f"返回股票数应与请求数量一致"
+        
+        # 验证基本字段存在
+        for stock in result["stocks"]:
+            assert "market" in stock, "股票数据应包含market字段"
+            assert "code" in stock, "股票数据应包含code字段"
+            assert "pre_close" in stock, "basic字段集应包含pre_close"
+            assert "open" in stock, "basic字段集应包含open"
+            assert "high" in stock, "basic字段集应包含high"
+            assert "low" in stock, "basic字段集应包含low"
+            assert "close" in stock, "basic字段集应包含close"
+            assert "vol" in stock, "basic字段集应包含vol"
+
+    def test_get_symbol_quotes_with_quote_fields(self, mqc:macQuotationClient):
+        """测试使用 quote 字段预设获取盘口数据"""
+        code_list = [
+            (MARKET.SZ, '000001'),
+        ]
+        
+        result = mqc.get_symbol_quotes(code_list, fields=PresetField.QUOTE)
+        
+        # 验证返回结构
+        assert isinstance(result, dict), f"返回类型应为dict，实际为{type(result)}"
+        assert len(result["stocks"]) == len(code_list), f"返回股票数应与请求数量一致"
+        
+        # 验证盘口字段存在
+        for stock in result["stocks"]:
+            assert "bid_price" in stock, "quote字段集应包含bid_price"
+            assert "ask_price" in stock, "quote字段集应包含ask_price"
+            assert "bid_volume" in stock, "quote字段集应包含bid_volume"
+            assert "ask_volume" in stock, "quote字段集应包含ask_volume"
+            assert "last_volume" in stock, "quote字段集应包含last_volume"
+
+    def test_get_symbol_quotes_with_volume_fields(self, mqc:macQuotationClient):
+        """测试使用 volume 字段预设获取量能数据"""
+        code_list = [
+            (MARKET.SZ, '000001'),
+        ]
+        
+        result = mqc.get_symbol_quotes(code_list, fields=PresetField.VOLUME)
+        
+        # 验证返回结构
+        assert isinstance(result, dict), f"返回类型应为dict，实际为{type(result)}"
+        assert len(result["stocks"]) == len(code_list), f"返回股票数应与请求数量一致"
+        
+        # 验证量能字段存在
+        for stock in result["stocks"]:
+            assert "vol" in stock, "volume字段集应包含vol"
+            assert "amount" in stock, "volume字段集应包含amount"
+            assert "turnover" in stock, "volume字段集应包含turnover"
+            assert "vol_ratio" in stock, "volume字段集应包含vol_ratio"
+
+    def test_get_symbol_quotes_with_combined_fields(self, mqc:macQuotationClient):
+        """测试使用组合字段（basic+quote）获取股票行情"""
+        code_list = [
+            (MARKET.SZ, '000001'),
+            (MARKET.SH, '600000'),
+        ]
+        
+        result = mqc.get_symbol_quotes(code_list, fields=PresetField.BASIC + PresetField.QUOTE)
+        
+        # 验证返回结构
+        assert isinstance(result, dict), f"返回类型应为dict，实际为{type(result)}"
+        assert result["count"] == len(code_list), f"返回数量应与请求数量一致"
+        assert len(result["stocks"]) == len(code_list), f"返回股票数应与请求数量一致"
+        
+        # 验证组合字段都存在
+        for stock in result["stocks"]:
+            # Basic字段
+            assert "pre_close" in stock, "应包含pre_close"
+            assert "close" in stock, "应包含close"
+            # Quote字段
+            assert "bid_price" in stock, "应包含bid_price"
+            assert "ask_price" in stock, "应包含ask_price"
+
+    def test_get_symbol_quotes_with_fundamental_fields(self, mqc:macQuotationClient):
+        """测试使用 fundamental 字段预设获取基本面数据"""
+        code_list = [
+            (MARKET.SZ, '000001'),
+        ]
+        
+        result = mqc.get_symbol_quotes(code_list, fields=PresetField.FUNDAMENTAL)
+        
+        # 验证返回结构
+        assert isinstance(result, dict), f"返回类型应为dict，实际为{type(result)}"
+        assert len(result["stocks"]) == len(code_list), f"返回股票数应与请求数量一致"
+        
+        # 验证基本面字段存在
+        for stock in result["stocks"]:
+            assert "total_shares" in stock, "fundamental字段集应包含total_shares"
+            assert "float_shares" in stock, "fundamental字段集应包含float_shares"
+            assert "eps" in stock, "fundamental字段集应包含EPS"
+            assert "net_assets" in stock, "fundamental字段集应包含net_assets"
+
+class TestMacQuotationClientSymbolTransaction:
+    """分时成交 API - 真实请求测试"""
+
+    def test_get_symbol_transactions_basic(self, mqc: macQuotationClient):
+        result = mqc.get_symbol_transactions(MARKET.SH, '601000', count=10)
+        assert isinstance(result, list)
+        if not result:
+            return
+        assert len(result) == 10
+
+    def test_get_symbol_transactions_data_structure(self, mqc: macQuotationClient):
+        result = mqc.get_symbol_transactions(MARKET.SZ, '000001', count=5)
+        if not result:
+            return
+        
+        # 验证每笔成交记录的字段
+        required_tx_fields = ['time', 'price', 'vol', 'trade_count', 'bs_flag']
+        
+        for i, tx in enumerate(result):
+            assert isinstance(tx, dict), f"第{i}笔成交应为字典类型"
+            
+            for field in required_tx_fields:
+                assert field in tx, f"第{i}笔成交缺少字段: {field}"
+            
+            # 验证字段类型
+            assert isinstance(tx['time'], time), f"第{i}笔成交 time 应为time类型"
+            assert isinstance(tx['price'], float), f"第{i}笔成交 price 应为浮点数"
+            assert isinstance(tx['vol'], int), f"第{i}笔成交 vol 应为整数"
+            assert isinstance(tx['trade_count'], int), f"第{i}笔成交 trade_count 应为整数"
+            assert isinstance(tx['bs_flag'], int), f"第{i}笔成交 bs_flag 应为整数"
+            
+            # 验证时间格式
+            assert isinstance(tx['time'], time), f"第{i}笔成交 time 应为time类型"
+
+            # 验证价格合理性
+            assert tx['price'] > 0, f"第{i}笔成交价格应大于0"
+
+            # 验证成交量合理性
+            assert tx['vol'] >= 0, f"第{i}笔成交量应大于等于0"
+
+            # 验证买卖方向标志
+            assert tx['bs_flag'] in [0, 1, 2, 5], \
+                f"第{i}笔成交 bs_flag 值无效: {tx['bs_flag']} (应为0/1/2/5)"
+        
+    def test_get_symbol_transactions_historical_date(self, mqc: macQuotationClient):
+        from datetime import date
+
+        test_date = date(2024, 1, 15)
+        result = mqc.get_symbol_transactions(MARKET.SH, '601000', count=5, query_date=test_date)
+        assert isinstance(result, list), "返回类型应为list"
+        assert len(result) > 0, "历史日期应返回成交数据"
+
+    def test_get_symbol_transactions_future_date(self, mqc: macQuotationClient):
+        from datetime import date, timedelta
+
+        future_date = date.today() + timedelta(days=1)
+        result = mqc.get_symbol_transactions(MARKET.SH, '601000', count=5, query_date=future_date)
+        assert isinstance(result, list), "返回类型应为list"
+
+    def test_get_symbol_transactions_weekend_date(self, mqc: macQuotationClient):
+        from datetime import date
+
+        weekend_date = date(2024, 1, 13)
+        result = mqc.get_symbol_transactions(MARKET.SH, '601000', count=5, query_date=weekend_date)
+        assert isinstance(result, list), "返回类型应为list"
+
+    def test_get_symbol_transactions_multiple_markets(self, mqc: macQuotationClient):
+        sh_result = mqc.get_symbol_transactions(MARKET.SH, '600000', count=3)
+        assert isinstance(sh_result, list)
+        sz_result = mqc.get_symbol_transactions(MARKET.SZ, '000001', count=3)
+        assert isinstance(sz_result, list)
+
+    def test_get_symbol_transactions_pagination(self, mqc: macQuotationClient):
+        page1 = mqc.get_symbol_transactions(MARKET.SH, '601000', count=5, start=0)
+        page2 = mqc.get_symbol_transactions(MARKET.SH, '601000', count=5, start=5)
+        assert isinstance(page1, list) and isinstance(page2, list)
+        if page1 and page2:
+            page1_times = [tx['time'] for tx in page1]
+            page2_times = [tx['time'] for tx in page2]
+            assert page1_times != page2_times
+
+    def test_get_symbol_transactions_large_count(self, mqc: macQuotationClient):
+        result = mqc.get_symbol_transactions(MARKET.SH, '601000', count=100)
+        assert isinstance(result, list)
+        if result:
+            assert len(result) <= 100
+
+    def test_get_symbol_transactions_bs_flag_distribution(self, mqc: macQuotationClient):
+        result = mqc.get_symbol_transactions(MARKET.SH, '601000', count=50)
+        assert isinstance(result, list)
+        valid_flags = {0, 1, 2, 5}
+        for tx in result:
+            assert tx['bs_flag'] in valid_flags, f"无效的 bs_flag 值: {tx['bs_flag']}"
+
+    def test_get_symbol_transactions_price_range(self, mqc: macQuotationClient):
+        result = mqc.get_symbol_transactions(MARKET.SH, '601000', count=20)
+        assert isinstance(result, list)
+        if result:
+            prices = [tx['price'] for tx in result]
+            assert min(prices) > 0

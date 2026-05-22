@@ -1,0 +1,277 @@
+[
+  {
+    "功能": "服务器信息",
+    "结果": "成功",
+    "耗时秒": 0.07,
+    "返回数量": 15,
+    "样例字段": [
+      "count",
+      "flags",
+      "tag",
+      "today",
+      "ts1",
+      "sessions_1",
+      "sessions_2",
+      "flag",
+      "last_trading_day",
+      "ts2",
+      "last_trading_day_2",
+      "ts3"
+    ]
+  },
+  {
+    "功能": "深市股票数量",
+    "结果": "成功",
+    "耗时秒": 0.07,
+    "返回数量": null,
+    "样例字段": []
+  },
+  {
+    "功能": "深市股票列表",
+    "结果": "成功",
+    "耗时秒": 0.07,
+    "返回数量": 5,
+    "样例字段": [
+      "code",
+      "vol",
+      "name",
+      "decimal_point",
+      "pre_close",
+      "unknown1"
+    ]
+  },
+  {
+    "功能": "A股实时报价",
+    "结果": "成功",
+    "耗时秒": 2.27,
+    "返回数量": 2,
+    "样例字段": [
+      "market",
+      "code",
+      "close",
+      "open",
+      "high",
+      "low",
+      "pre_close",
+      "server_time",
+      "neg_price",
+      "vol",
+      "cur_vol",
+      "amount"
+    ]
+  },
+  {
+    "功能": "A股日K线",
+    "结果": "成功",
+    "耗时秒": 0.03,
+    "返回数量": 5,
+    "样例字段": [
+      "datetime",
+      "open",
+      "high",
+      "low",
+      "close",
+      "vol",
+      "amount",
+      "float_shares",
+      "turnover"
+    ]
+  },
+  {
+    "功能": "指数信息",
+    "结果": "成功",
+    "耗时秒": 0.05,
+    "返回数量": 2,
+    "样例字段": [
+      "market",
+      "code",
+      "active",
+      "pre_close",
+      "diff",
+      "close",
+      "open",
+      "high",
+      "low",
+      "vol",
+      "amount",
+      "up_count"
+    ]
+  },
+  {
+    "功能": "个股分时",
+    "结果": "成功",
+    "耗时秒": 0.03,
+    "返回数量": 5,
+    "样例字段": [
+      "time",
+      "price",
+      "avg",
+      "vol",
+      "momentum"
+    ]
+  },
+  {
+    "功能": "逐笔成交",
+    "结果": "成功",
+    "耗时秒": 0.06,
+    "返回数量": 5,
+    "样例字段": [
+      "time",
+      "price",
+      "vol",
+      "trade_count",
+      "bs_flag"
+    ]
+  },
+  {
+    "功能": "集合竞价",
+    "结果": "成功",
+    "耗时秒": 0.03,
+    "返回数量": 5,
+    "样例字段": [
+      "time",
+      "price",
+      "matched",
+      "unmatched"
+    ]
+  },
+  {
+    "功能": "市场异动",
+    "结果": "成功",
+    "耗时秒": 0.03,
+    "返回数量": 5,
+    "样例字段": [
+      "index",
+      "market",
+      "code",
+      "time",
+      "desc",
+      "value",
+      "unusual_type",
+      "v1",
+      "v2",
+      "v3",
+      "v4",
+      "flag"
+    ]
+  },
+  {
+    "功能": "概念板块列表",
+    "结果": "成功",
+    "耗时秒": 0.03,
+    "返回数量": 5,
+    "样例字段": [
+      "market",
+      "code",
+      "name",
+      "price",
+      "rise_speed",
+      "pre_close",
+      "symbol_market",
+      "symbol_code",
+      "symbol_name",
+      "symbol_price",
+      "symbol_rise_speed",
+      "symbol_pre_close"
+    ]
+  },
+  {
+    "功能": "板块成分行情",
+    "结果": "成功",
+    "耗时秒": 0.03,
+    "返回数量": 5,
+    "样例字段": [
+      "market",
+      "code",
+      "name",
+      "pre_close",
+      "open",
+      "high",
+      "low",
+      "close",
+      "vol",
+      "vol_ratio",
+      "amount",
+      "total_shares"
+    ]
+  },
+  {
+    "功能": "个股所属板块",
+    "结果": "成功",
+    "耗时秒": 0.03,
+    "返回数量": 3,
+    "样例字段": [
+      "data",
+      "query_info",
+      "ext"
+    ]
+  },
+  {
+    "功能": "个股资金流向",
+    "结果": "成功",
+    "耗时秒": 0.03,
+    "返回数量": 3,
+    "样例字段": [
+      "data",
+      "query_info",
+      "ext"
+    ]
+  },
+  {
+    "功能": "主力监控",
+    "结果": "成功",
+    "耗时秒": 0.03,
+    "返回数量": 5,
+    "样例字段": [
+      "index",
+      "market",
+      "code",
+      "time",
+      "desc",
+      "value",
+      "unusual_type",
+      "v1",
+      "v2",
+      "v3",
+      "v4",
+      "flag"
+    ]
+  },
+  {
+    "功能": "美股K线",
+    "结果": "成功",
+    "耗时秒": 0.05,
+    "返回数量": 3,
+    "样例字段": [
+      "datetime",
+      "open",
+      "high",
+      "low",
+      "close",
+      "vol",
+      "amount",
+      "float_shares",
+      "turnover"
+    ]
+  },
+  {
+    "功能": "港美股报价",
+    "结果": "成功",
+    "耗时秒": 0.05,
+    "返回数量": 2,
+    "样例字段": [
+      "market",
+      "code",
+      "active",
+      "pre_close",
+      "open",
+      "high",
+      "low",
+      "close",
+      "open_position",
+      "add_position",
+      "vol",
+      "curr_vol"
+    ]
+  }
+]

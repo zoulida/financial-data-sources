@@ -1,0 +1,14 @@
+__pycache__/
+build/
+dist/
+*.egg-info/
+*.pyc
+venv/
+.venv/
+.vscode/
+pip_install.sh
+demo*.py
+/*.csv
+.DS_Store
+ai/
+uv.lock
