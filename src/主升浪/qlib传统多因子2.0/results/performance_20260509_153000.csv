@@ -1,0 +1,2 @@
+﻿signal,annual_return,sharpe,max_drawdown,excess_return,ic_periods
+score_ml_lightgbm,1.2460161253198918,9.593652568616372,-0.03736391067340613,0.7663531302281826,72

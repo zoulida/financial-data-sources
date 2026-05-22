@@ -1,0 +1,13 @@
+{
+  "n_factors_total": 3,
+  "factor_libraries": [
+    "custom"
+  ],
+  "market": "all",
+  "start_time": "2024-11-01",
+  "end_time": "2026-04-30",
+  "future_return_mode": "max_close",
+  "holding_period": 14,
+  "quantiles": 5,
+  "saved_at": "2026-05-17 10:51:36"
+}

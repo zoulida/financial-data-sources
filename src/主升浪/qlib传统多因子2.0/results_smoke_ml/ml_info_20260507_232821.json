@@ -1,0 +1,7 @@
+{
+  "model_name": "ridge",
+  "n_train": 27434,
+  "n_valid": 5423,
+  "n_test": 13717,
+  "n_features": 2
+}

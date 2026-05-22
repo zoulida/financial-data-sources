@@ -1,0 +1,5 @@
+﻿factor,function,path,expression
+ga_final_0000,compute_ga_1779258500_001,D:\pythonProject\sdufe-qlib\source\factors\custom\compute_ga_1779258500_001.py,ts_min[60](ts_min[10](ts_min[60](open)))
+ga_final_0016,compute_ga_1779258500_002,D:\pythonProject\sdufe-qlib\source\factors\custom\compute_ga_1779258500_002.py,ts_min[60](ts_min[10](ts_min[60](returns)))
+ga_final_0027,compute_ga_1779258500_003,D:\pythonProject\sdufe-qlib\source\factors\custom\compute_ga_1779258500_003.py,ts_min[3](ts_std[10](returns))
+ga_final_0047,compute_ga_1779258500_004,D:\pythonProject\sdufe-qlib\source\factors\custom\compute_ga_1779258500_004.py,volume

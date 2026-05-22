@@ -1,0 +1,21 @@
+from __future__ import annotations
+
+import numpy as np
+import pandas as pd
+
+from ._base import _avg_price
+
+
+def compute_amount_mean_20_ratio(
+    high_df: pd.DataFrame,
+    low_df: pd.DataFrame,
+    close_df: pd.DataFrame,
+    amount_df: pd.DataFrame,
+) -> pd.DataFrame:
+    """20日平均成交额 / 典型价格。"""
+    if high_df.empty or low_df.empty or close_df.empty or amount_df.empty:
+        return close_df.copy()
+    typical_price = _avg_price(high_df, low_df, close_df).replace(0, np.nan)
+    mean_amount = amount_df.rolling(20, min_periods=20).mean()
+    factor_df = mean_amount.divide(typical_price)
+    return factor_df.replace([np.inf, -np.inf], np.nan)

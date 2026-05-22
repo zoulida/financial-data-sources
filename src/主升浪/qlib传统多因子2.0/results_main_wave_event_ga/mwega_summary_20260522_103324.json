@@ -1,0 +1,21 @@
+{
+  "elapsed_seconds": 212.8394946999615,
+  "population_size": 60,
+  "generations": 20,
+  "label_mode": "all",
+  "event_count": 40,
+  "archive_size": 42,
+  "selected_factors": [
+    "mwega_final_0001",
+    "mwega_final_0013",
+    "mwega_final_0000",
+    "mwega_final_0038",
+    "mwega_final_0010",
+    "mwega_final_0028",
+    "mwega_final_0032",
+    "mwega_final_0002",
+    "mwega_final_0033",
+    "mwega_final_0014"
+  ],
+  "exported": 10
+}

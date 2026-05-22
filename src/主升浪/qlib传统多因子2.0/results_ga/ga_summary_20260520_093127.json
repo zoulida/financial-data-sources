@@ -1,0 +1,12 @@
+{
+  "population_size": 50,
+  "generations": 20,
+  "archive_size": 63,
+  "exported": 0,
+  "selected_factors": [
+    "ga_final_0000",
+    "ga_final_0016",
+    "ga_final_0027",
+    "ga_final_0047"
+  ]
+}

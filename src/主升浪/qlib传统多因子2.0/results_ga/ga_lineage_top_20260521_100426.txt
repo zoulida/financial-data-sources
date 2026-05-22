@@ -1,0 +1,594 @@
+# GA Lineage Top 10
+
+
+[1] factor=ga_g016_0002 | fitness=1.3674
+    expr   = ts_min[60](ts_min[10](ts_min[60](open)))
+    └─ gen=13 op=crossover parents=2
+        parent[0] = ts_min[60](open)
+        └─ gen=6 op=crossover+mutate mutate=ts_min parents=2
+            parent[0] = abs(scale(ts_std[20](returns)))
+            └─ gen=4 op=crossover parents=2
+                parent[0] = abs(scale(high))
+                └─ gen=2 op=crossover+mutate mutate=abs parents=2
+                    parent[0] = abs(scale(open))
+                    └─ gen=1 op=random_inject (root)
+                    parent[1] = vwap
+                    └─ gen=0 op=random_init (root)
+                parent[1] = ts_std[20](returns)
+                └─ gen=2 op=crossover parents=2
+                    parent[0] = ts_std[20](correlation[3](demean(open),open))
+                    └─ gen=1 op=crossover parents=2
+                        parent[0] = ts_std[20](correlation[3](demean(low),open))
+                        └─ gen=0 op=random_init (root)
+                        parent[1] = open
+                        └─ gen=0 op=random_init (root)
+                    parent[1] = returns
+                    └─ gen=0 op=random_init (root)
+            parent[1] = ts_std[20](correlation[3](sub(returns,vwap),open))
+            └─ gen=5 op=crossover parents=2
+                parent[0] = ts_std[20](correlation[3](open,open))
+                └─ gen=1 op=crossover parents=2
+                    parent[0] = ts_std[20](correlation[3](demean(low),open))
+                    └─ gen=0 op=random_init (root)
+                    parent[1] = open
+                    └─ gen=0 op=random_init (root)
+                parent[1] = sub(returns,vwap)
+                └─ gen=3 op=crossover parents=2
+                    parent[0] = sub(returns,open)
+                    └─ gen=1 op=random_inject (root)
+                    parent[1] = vwap
+                    └─ gen=0 op=random_init (root)
+        parent[1] = ts_min[10](ts_min[60](open))
+        └─ gen=9 op=crossover parents=2
+            parent[0] = ts_min[10](volume)
+            └─ gen=8 op=mutate mutate=ts_min parents=1
+                parent[0] = ts_min[20](volume)
+                └─ gen=6 op=crossover parents=2
+                    parent[0] = ts_min[20](open)
+                    └─ gen=0 op=random_init (root)
+                    parent[1] = volume
+                    └─ gen=0 op=random_init (root)
+            parent[1] = ts_min[60](open)
+            └─ gen=6 op=crossover+mutate mutate=ts_min parents=2
+                parent[0] = abs(scale(ts_std[20](returns)))
+                └─ gen=4 op=crossover parents=2
+                    parent[0] = abs(scale(high))
+                    └─ gen=2 op=crossover+mutate mutate=abs parents=2
+                        parent[0] = abs(scale(open))
+                        └─ gen=1 op=random_inject (root)
+                        parent[1] = vwap
+                        └─ gen=0 op=random_init (root)
+                    parent[1] = ts_std[20](returns)
+                    └─ gen=2 op=crossover parents=2
+                        parent[0] = ts_std[20](correlation[3](demean(open),open))
+                        └─ gen=1 op=crossover parents=2
+                            parent[0] = ts_std[20](correlation[3](demean(low),open))
+                            parent[1] = open
+                        parent[1] = returns
+                        └─ gen=0 op=random_init (root)
+                parent[1] = ts_std[20](correlation[3](sub(returns,vwap),open))
+                └─ gen=5 op=crossover parents=2
+                    parent[0] = ts_std[20](correlation[3](open,open))
+                    └─ gen=1 op=crossover parents=2
+                        parent[0] = ts_std[20](correlation[3](demean(low),open))
+                        └─ gen=0 op=random_init (root)
+                        parent[1] = open
+                        └─ gen=0 op=random_init (root)
+                    parent[1] = sub(returns,vwap)
+                    └─ gen=3 op=crossover parents=2
+                        parent[0] = sub(returns,open)
+                        └─ gen=1 op=random_inject (root)
+                        parent[1] = vwap
+                        └─ gen=0 op=random_init (root)
+
+[2] factor=ga_g016_0000 | fitness=1.3674
+    expr   = ts_min[60](ts_min[60](ts_min[10](open)))
+    └─ gen=12 op=crossover parents=2
+        parent[0] = ts_min[60](abs(ts_min[60](high)))
+        └─ gen=11 op=mutate mutate=ts_min parents=1
+            parent[0] = ts_min[60](abs(ts_min[60](open)))
+            └─ gen=10 op=crossover parents=2
+                parent[0] = ts_min[60](vwap)
+                └─ gen=9 op=mutate mutate=ts_min parents=1
+                    parent[0] = ts_min[60](open)
+                    └─ gen=6 op=crossover+mutate mutate=ts_min parents=2
+                        parent[0] = abs(scale(ts_std[20](returns)))
+                        └─ gen=4 op=crossover parents=2
+                            parent[0] = abs(scale(high))
+                            parent[1] = ts_std[20](returns)
+                        parent[1] = ts_std[20](correlation[3](sub(returns,vwap),open))
+                        └─ gen=5 op=crossover parents=2
+                            parent[0] = ts_std[20](correlation[3](open,open))
+                            parent[1] = sub(returns,vwap)
+                parent[1] = abs(ts_min[60](open))
+                └─ gen=9 op=crossover parents=2
+                    parent[0] = abs(ts_std[20](safe_div(open,low)))
+                    └─ gen=6 op=crossover parents=2
+                        parent[0] = abs(ts_std[20](correlation[3](open,open)))
+                        └─ gen=5 op=crossover parents=2
+                            parent[0] = abs(scale(ts_std[20](returns)))
+                            parent[1] = ts_std[20](correlation[3](open,open))
+                        parent[1] = safe_div(open,low)
+                        └─ gen=5 op=random_inject (root)
+                    parent[1] = ts_min[60](open)
+                    └─ gen=6 op=crossover+mutate mutate=ts_min parents=2
+                        parent[0] = abs(scale(ts_std[20](returns)))
+                        └─ gen=4 op=crossover parents=2
+                            parent[0] = abs(scale(high))
+                            parent[1] = ts_std[20](returns)
+                        parent[1] = ts_std[20](correlation[3](sub(returns,vwap),open))
+                        └─ gen=5 op=crossover parents=2
+                            parent[0] = ts_std[20](correlation[3](open,open))
+                            parent[1] = sub(returns,vwap)
+        parent[1] = ts_min[60](ts_min[10](open))
+        └─ gen=11 op=crossover parents=2
+            parent[0] = ts_min[60](vwap)
+            └─ gen=9 op=mutate mutate=ts_min parents=1
+                parent[0] = ts_min[60](open)
+                └─ gen=6 op=crossover+mutate mutate=ts_min parents=2
+                    parent[0] = abs(scale(ts_std[20](returns)))
+                    └─ gen=4 op=crossover parents=2
+                        parent[0] = abs(scale(high))
+                        └─ gen=2 op=crossover+mutate mutate=abs parents=2
+                            parent[0] = abs(scale(open))
+                            parent[1] = vwap
+                        parent[1] = ts_std[20](returns)
+                        └─ gen=2 op=crossover parents=2
+                            parent[0] = ts_std[20](correlation[3](demean(open),open))
+                            parent[1] = returns
+                    parent[1] = ts_std[20](correlation[3](sub(returns,vwap),open))
+                    └─ gen=5 op=crossover parents=2
+                        parent[0] = ts_std[20](correlation[3](open,open))
+                        └─ gen=1 op=crossover parents=2
+                            parent[0] = ts_std[20](correlation[3](demean(low),open))
+                            parent[1] = open
+                        parent[1] = sub(returns,vwap)
+                        └─ gen=3 op=crossover parents=2
+                            parent[0] = sub(returns,open)
+                            parent[1] = vwap
+            parent[1] = ts_min[10](open)
+            └─ gen=10 op=crossover+mutate mutate=ts_min parents=2
+                parent[0] = ts_min[60](vwap)
+                └─ gen=9 op=mutate mutate=ts_min parents=1
+                    parent[0] = ts_min[60](open)
+                    └─ gen=6 op=crossover+mutate mutate=ts_min parents=2
+                        parent[0] = abs(scale(ts_std[20](returns)))
+                        └─ gen=4 op=crossover parents=2
+                            parent[0] = abs(scale(high))
+                            parent[1] = ts_std[20](returns)
+                        parent[1] = ts_std[20](correlation[3](sub(returns,vwap),open))
+                        └─ gen=5 op=crossover parents=2
+                            parent[0] = ts_std[20](correlation[3](open,open))
+                            parent[1] = sub(returns,vwap)
+                parent[1] = ts_min[10](add(ts_min[60](open),ts_min[20](volume)))
+                └─ gen=9 op=crossover parents=2
+                    parent[0] = ts_min[10](volume)
+                    └─ gen=8 op=mutate mutate=ts_min parents=1
+                        parent[0] = ts_min[20](volume)
+                        └─ gen=6 op=crossover parents=2
+                            parent[0] = ts_min[20](open)
+                            parent[1] = volume
+                    parent[1] = add(ts_min[60](open),ts_min[20](volume))
+                    └─ gen=8 op=crossover parents=2
+                        parent[0] = add(ts_min[60](open),ts_min[30](low))
+                        └─ gen=7 op=crossover parents=2
+                            parent[0] = add(low,ts_min[30](low))
+                            parent[1] = ts_min[60](open)
+                        parent[1] = ts_min[20](volume)
+                        └─ gen=6 op=crossover parents=2
+                            parent[0] = ts_min[20](open)
+                            parent[1] = volume
+
+[3] factor=ga_g016_0001 | fitness=1.3674
+    expr   = ts_min[10](ts_min[60](ts_min[60](open)))
+    └─ gen=12 op=crossover parents=2
+        parent[0] = ts_min[10](ts_min[60](open))
+        └─ gen=9 op=crossover parents=2
+            parent[0] = ts_min[10](volume)
+            └─ gen=8 op=mutate mutate=ts_min parents=1
+                parent[0] = ts_min[20](volume)
+                └─ gen=6 op=crossover parents=2
+                    parent[0] = ts_min[20](open)
+                    └─ gen=0 op=random_init (root)
+                    parent[1] = volume
+                    └─ gen=0 op=random_init (root)
+            parent[1] = ts_min[60](open)
+            └─ gen=6 op=crossover+mutate mutate=ts_min parents=2
+                parent[0] = abs(scale(ts_std[20](returns)))
+                └─ gen=4 op=crossover parents=2
+                    parent[0] = abs(scale(high))
+                    └─ gen=2 op=crossover+mutate mutate=abs parents=2
+                        parent[0] = abs(scale(open))
+                        └─ gen=1 op=random_inject (root)
+                        parent[1] = vwap
+                        └─ gen=0 op=random_init (root)
+                    parent[1] = ts_std[20](returns)
+                    └─ gen=2 op=crossover parents=2
+                        parent[0] = ts_std[20](correlation[3](demean(open),open))
+                        └─ gen=1 op=crossover parents=2
+                            parent[0] = ts_std[20](correlation[3](demean(low),open))
+                            parent[1] = open
+                        parent[1] = returns
+                        └─ gen=0 op=random_init (root)
+                parent[1] = ts_std[20](correlation[3](sub(returns,vwap),open))
+                └─ gen=5 op=crossover parents=2
+                    parent[0] = ts_std[20](correlation[3](open,open))
+                    └─ gen=1 op=crossover parents=2
+                        parent[0] = ts_std[20](correlation[3](demean(low),open))
+                        └─ gen=0 op=random_init (root)
+                        parent[1] = open
+                        └─ gen=0 op=random_init (root)
+                    parent[1] = sub(returns,vwap)
+                    └─ gen=3 op=crossover parents=2
+                        parent[0] = sub(returns,open)
+                        └─ gen=1 op=random_inject (root)
+                        parent[1] = vwap
+                        └─ gen=0 op=random_init (root)
+        parent[1] = ts_min[60](open)
+        └─ gen=6 op=crossover+mutate mutate=ts_min parents=2
+            parent[0] = abs(scale(ts_std[20](returns)))
+            └─ gen=4 op=crossover parents=2
+                parent[0] = abs(scale(high))
+                └─ gen=2 op=crossover+mutate mutate=abs parents=2
+                    parent[0] = abs(scale(open))
+                    └─ gen=1 op=random_inject (root)
+                    parent[1] = vwap
+                    └─ gen=0 op=random_init (root)
+                parent[1] = ts_std[20](returns)
+                └─ gen=2 op=crossover parents=2
+                    parent[0] = ts_std[20](correlation[3](demean(open),open))
+                    └─ gen=1 op=crossover parents=2
+                        parent[0] = ts_std[20](correlation[3](demean(low),open))
+                        └─ gen=0 op=random_init (root)
+                        parent[1] = open
+                        └─ gen=0 op=random_init (root)
+                    parent[1] = returns
+                    └─ gen=0 op=random_init (root)
+            parent[1] = ts_std[20](correlation[3](sub(returns,vwap),open))
+            └─ gen=5 op=crossover parents=2
+                parent[0] = ts_std[20](correlation[3](open,open))
+                └─ gen=1 op=crossover parents=2
+                    parent[0] = ts_std[20](correlation[3](demean(low),open))
+                    └─ gen=0 op=random_init (root)
+                    parent[1] = open
+                    └─ gen=0 op=random_init (root)
+                parent[1] = sub(returns,vwap)
+                └─ gen=3 op=crossover parents=2
+                    parent[0] = sub(returns,open)
+                    └─ gen=1 op=random_inject (root)
+                    parent[1] = vwap
+                    └─ gen=0 op=random_init (root)
+
+[4] factor=ga_g018_0025 | fitness=1.3615
+    expr   = ts_min[60](abs(ts_min[60](low)))
+    └─ gen=18 op=crossover parents=2
+        parent[0] = ts_min[60](abs(ts_min[60](open)))
+        └─ gen=10 op=crossover parents=2
+            parent[0] = ts_min[60](vwap)
+            └─ gen=9 op=mutate mutate=ts_min parents=1
+                parent[0] = ts_min[60](open)
+                └─ gen=6 op=crossover+mutate mutate=ts_min parents=2
+                    parent[0] = abs(scale(ts_std[20](returns)))
+                    └─ gen=4 op=crossover parents=2
+                        parent[0] = abs(scale(high))
+                        └─ gen=2 op=crossover+mutate mutate=abs parents=2
+                            parent[0] = abs(scale(open))
+                            parent[1] = vwap
+                        parent[1] = ts_std[20](returns)
+                        └─ gen=2 op=crossover parents=2
+                            parent[0] = ts_std[20](correlation[3](demean(open),open))
+                            parent[1] = returns
+                    parent[1] = ts_std[20](correlation[3](sub(returns,vwap),open))
+                    └─ gen=5 op=crossover parents=2
+                        parent[0] = ts_std[20](correlation[3](open,open))
+                        └─ gen=1 op=crossover parents=2
+                            parent[0] = ts_std[20](correlation[3](demean(low),open))
+                            parent[1] = open
+                        parent[1] = sub(returns,vwap)
+                        └─ gen=3 op=crossover parents=2
+                            parent[0] = sub(returns,open)
+                            parent[1] = vwap
+            parent[1] = abs(ts_min[60](open))
+            └─ gen=9 op=crossover parents=2
+                parent[0] = abs(ts_std[20](safe_div(open,low)))
+                └─ gen=6 op=crossover parents=2
+                    parent[0] = abs(ts_std[20](correlation[3](open,open)))
+                    └─ gen=5 op=crossover parents=2
+                        parent[0] = abs(scale(ts_std[20](returns)))
+                        └─ gen=4 op=crossover parents=2
+                            parent[0] = abs(scale(high))
+                            parent[1] = ts_std[20](returns)
+                        parent[1] = ts_std[20](correlation[3](open,open))
+                        └─ gen=1 op=crossover parents=2
+                            parent[0] = ts_std[20](correlation[3](demean(low),open))
+                            parent[1] = open
+                    parent[1] = safe_div(open,low)
+                    └─ gen=5 op=random_inject (root)
+                parent[1] = ts_min[60](open)
+                └─ gen=6 op=crossover+mutate mutate=ts_min parents=2
+                    parent[0] = abs(scale(ts_std[20](returns)))
+                    └─ gen=4 op=crossover parents=2
+                        parent[0] = abs(scale(high))
+                        └─ gen=2 op=crossover+mutate mutate=abs parents=2
+                            parent[0] = abs(scale(open))
+                            parent[1] = vwap
+                        parent[1] = ts_std[20](returns)
+                        └─ gen=2 op=crossover parents=2
+                            parent[0] = ts_std[20](correlation[3](demean(open),open))
+                            parent[1] = returns
+                    parent[1] = ts_std[20](correlation[3](sub(returns,vwap),open))
+                    └─ gen=5 op=crossover parents=2
+                        parent[0] = ts_std[20](correlation[3](open,open))
+                        └─ gen=1 op=crossover parents=2
+                            parent[0] = ts_std[20](correlation[3](demean(low),open))
+                            parent[1] = open
+                        parent[1] = sub(returns,vwap)
+                        └─ gen=3 op=crossover parents=2
+                            parent[0] = sub(returns,open)
+                            parent[1] = vwap
+        parent[1] = low
+        └─ gen=0 op=random_init (root)
+
+[5] factor=ga_g010_0007 | fitness=1.3579
+    expr   = ts_min[60](abs(ts_min[60](open)))
+    └─ gen=10 op=crossover parents=2
+        parent[0] = ts_min[60](vwap)
+        └─ gen=9 op=mutate mutate=ts_min parents=1
+            parent[0] = ts_min[60](open)
+            └─ gen=6 op=crossover+mutate mutate=ts_min parents=2
+                parent[0] = abs(scale(ts_std[20](returns)))
+                └─ gen=4 op=crossover parents=2
+                    parent[0] = abs(scale(high))
+                    └─ gen=2 op=crossover+mutate mutate=abs parents=2
+                        parent[0] = abs(scale(open))
+                        └─ gen=1 op=random_inject (root)
+                        parent[1] = vwap
+                        └─ gen=0 op=random_init (root)
+                    parent[1] = ts_std[20](returns)
+                    └─ gen=2 op=crossover parents=2
+                        parent[0] = ts_std[20](correlation[3](demean(open),open))
+                        └─ gen=1 op=crossover parents=2
+                            parent[0] = ts_std[20](correlation[3](demean(low),open))
+                            parent[1] = open
+                        parent[1] = returns
+                        └─ gen=0 op=random_init (root)
+                parent[1] = ts_std[20](correlation[3](sub(returns,vwap),open))
+                └─ gen=5 op=crossover parents=2
+                    parent[0] = ts_std[20](correlation[3](open,open))
+                    └─ gen=1 op=crossover parents=2
+                        parent[0] = ts_std[20](correlation[3](demean(low),open))
+                        └─ gen=0 op=random_init (root)
+                        parent[1] = open
+                        └─ gen=0 op=random_init (root)
+                    parent[1] = sub(returns,vwap)
+                    └─ gen=3 op=crossover parents=2
+                        parent[0] = sub(returns,open)
+                        └─ gen=1 op=random_inject (root)
+                        parent[1] = vwap
+                        └─ gen=0 op=random_init (root)
+        parent[1] = abs(ts_min[60](open))
+        └─ gen=9 op=crossover parents=2
+            parent[0] = abs(ts_std[20](safe_div(open,low)))
+            └─ gen=6 op=crossover parents=2
+                parent[0] = abs(ts_std[20](correlation[3](open,open)))
+                └─ gen=5 op=crossover parents=2
+                    parent[0] = abs(scale(ts_std[20](returns)))
+                    └─ gen=4 op=crossover parents=2
+                        parent[0] = abs(scale(high))
+                        └─ gen=2 op=crossover+mutate mutate=abs parents=2
+                            parent[0] = abs(scale(open))
+                            parent[1] = vwap
+                        parent[1] = ts_std[20](returns)
+                        └─ gen=2 op=crossover parents=2
+                            parent[0] = ts_std[20](correlation[3](demean(open),open))
+                            parent[1] = returns
+                    parent[1] = ts_std[20](correlation[3](open,open))
+                    └─ gen=1 op=crossover parents=2
+                        parent[0] = ts_std[20](correlation[3](demean(low),open))
+                        └─ gen=0 op=random_init (root)
+                        parent[1] = open
+                        └─ gen=0 op=random_init (root)
+                parent[1] = safe_div(open,low)
+                └─ gen=5 op=random_inject (root)
+            parent[1] = ts_min[60](open)
+            └─ gen=6 op=crossover+mutate mutate=ts_min parents=2
+                parent[0] = abs(scale(ts_std[20](returns)))
+                └─ gen=4 op=crossover parents=2
+                    parent[0] = abs(scale(high))
+                    └─ gen=2 op=crossover+mutate mutate=abs parents=2
+                        parent[0] = abs(scale(open))
+                        └─ gen=1 op=random_inject (root)
+                        parent[1] = vwap
+                        └─ gen=0 op=random_init (root)
+                    parent[1] = ts_std[20](returns)
+                    └─ gen=2 op=crossover parents=2
+                        parent[0] = ts_std[20](correlation[3](demean(open),open))
+                        └─ gen=1 op=crossover parents=2
+                            parent[0] = ts_std[20](correlation[3](demean(low),open))
+                            parent[1] = open
+                        parent[1] = returns
+                        └─ gen=0 op=random_init (root)
+                parent[1] = ts_std[20](correlation[3](sub(returns,vwap),open))
+                └─ gen=5 op=crossover parents=2
+                    parent[0] = ts_std[20](correlation[3](open,open))
+                    └─ gen=1 op=crossover parents=2
+                        parent[0] = ts_std[20](correlation[3](demean(low),open))
+                        └─ gen=0 op=random_init (root)
+                        parent[1] = open
+                        └─ gen=0 op=random_init (root)
+                    parent[1] = sub(returns,vwap)
+                    └─ gen=3 op=crossover parents=2
+                        parent[0] = sub(returns,open)
+                        └─ gen=1 op=random_inject (root)
+                        parent[1] = vwap
+                        └─ gen=0 op=random_init (root)
+
+[6] factor=ga_g011_0028 | fitness=1.3224
+    expr   = ts_min[60](abs(ts_min[60](high)))
+    └─ gen=11 op=mutate mutate=ts_min parents=1
+        parent[0] = ts_min[60](abs(ts_min[60](open)))
+        └─ gen=10 op=crossover parents=2
+            parent[0] = ts_min[60](vwap)
+            └─ gen=9 op=mutate mutate=ts_min parents=1
+                parent[0] = ts_min[60](open)
+                └─ gen=6 op=crossover+mutate mutate=ts_min parents=2
+                    parent[0] = abs(scale(ts_std[20](returns)))
+                    └─ gen=4 op=crossover parents=2
+                        parent[0] = abs(scale(high))
+                        └─ gen=2 op=crossover+mutate mutate=abs parents=2
+                            parent[0] = abs(scale(open))
+                            parent[1] = vwap
+                        parent[1] = ts_std[20](returns)
+                        └─ gen=2 op=crossover parents=2
+                            parent[0] = ts_std[20](correlation[3](demean(open),open))
+                            parent[1] = returns
+                    parent[1] = ts_std[20](correlation[3](sub(returns,vwap),open))
+                    └─ gen=5 op=crossover parents=2
+                        parent[0] = ts_std[20](correlation[3](open,open))
+                        └─ gen=1 op=crossover parents=2
+                            parent[0] = ts_std[20](correlation[3](demean(low),open))
+                            parent[1] = open
+                        parent[1] = sub(returns,vwap)
+                        └─ gen=3 op=crossover parents=2
+                            parent[0] = sub(returns,open)
+                            parent[1] = vwap
+            parent[1] = abs(ts_min[60](open))
+            └─ gen=9 op=crossover parents=2
+                parent[0] = abs(ts_std[20](safe_div(open,low)))
+                └─ gen=6 op=crossover parents=2
+                    parent[0] = abs(ts_std[20](correlation[3](open,open)))
+                    └─ gen=5 op=crossover parents=2
+                        parent[0] = abs(scale(ts_std[20](returns)))
+                        └─ gen=4 op=crossover parents=2
+                            parent[0] = abs(scale(high))
+                            parent[1] = ts_std[20](returns)
+                        parent[1] = ts_std[20](correlation[3](open,open))
+                        └─ gen=1 op=crossover parents=2
+                            parent[0] = ts_std[20](correlation[3](demean(low),open))
+                            parent[1] = open
+                    parent[1] = safe_div(open,low)
+                    └─ gen=5 op=random_inject (root)
+                parent[1] = ts_min[60](open)
+                └─ gen=6 op=crossover+mutate mutate=ts_min parents=2
+                    parent[0] = abs(scale(ts_std[20](returns)))
+                    └─ gen=4 op=crossover parents=2
+                        parent[0] = abs(scale(high))
+                        └─ gen=2 op=crossover+mutate mutate=abs parents=2
+                            parent[0] = abs(scale(open))
+                            parent[1] = vwap
+                        parent[1] = ts_std[20](returns)
+                        └─ gen=2 op=crossover parents=2
+                            parent[0] = ts_std[20](correlation[3](demean(open),open))
+                            parent[1] = returns
+                    parent[1] = ts_std[20](correlation[3](sub(returns,vwap),open))
+                    └─ gen=5 op=crossover parents=2
+                        parent[0] = ts_std[20](correlation[3](open,open))
+                        └─ gen=1 op=crossover parents=2
+                            parent[0] = ts_std[20](correlation[3](demean(low),open))
+                            parent[1] = open
+                        parent[1] = sub(returns,vwap)
+                        └─ gen=3 op=crossover parents=2
+                            parent[0] = sub(returns,open)
+                            parent[1] = vwap
+
+[7] factor=ga_g013_0004 | fitness=1.2653
+    expr   = ts_min[3](sub(returns,ts_min[60](vwap)))
+    └─ gen=12 op=crossover parents=2
+        parent[0] = ts_min[3](sub(returns,low))
+        └─ gen=4 op=crossover parents=2
+            parent[0] = ts_min[3](abs(scale(open)))
+            └─ gen=2 op=crossover parents=2
+                parent[0] = ts_min[3](vwap)
+                └─ gen=0 op=random_init (root)
+                parent[1] = abs(scale(open))
+                └─ gen=1 op=random_inject (root)
+            parent[1] = sub(returns,low)
+            └─ gen=3 op=mutate mutate=sub parents=1
+                parent[0] = sub(returns,open)
+                └─ gen=1 op=random_inject (root)
+        parent[1] = ts_min[60](vwap)
+        └─ gen=9 op=mutate mutate=ts_min parents=1
+            parent[0] = ts_min[60](open)
+            └─ gen=6 op=crossover+mutate mutate=ts_min parents=2
+                parent[0] = abs(scale(ts_std[20](returns)))
+                └─ gen=4 op=crossover parents=2
+                    parent[0] = abs(scale(high))
+                    └─ gen=2 op=crossover+mutate mutate=abs parents=2
+                        parent[0] = abs(scale(open))
+                        └─ gen=1 op=random_inject (root)
+                        parent[1] = vwap
+                        └─ gen=0 op=random_init (root)
+                    parent[1] = ts_std[20](returns)
+                    └─ gen=2 op=crossover parents=2
+                        parent[0] = ts_std[20](correlation[3](demean(open),open))
+                        └─ gen=1 op=crossover parents=2
+                            parent[0] = ts_std[20](correlation[3](demean(low),open))
+                            parent[1] = open
+                        parent[1] = returns
+                        └─ gen=0 op=random_init (root)
+                parent[1] = ts_std[20](correlation[3](sub(returns,vwap),open))
+                └─ gen=5 op=crossover parents=2
+                    parent[0] = ts_std[20](correlation[3](open,open))
+                    └─ gen=1 op=crossover parents=2
+                        parent[0] = ts_std[20](correlation[3](demean(low),open))
+                        └─ gen=0 op=random_init (root)
+                        parent[1] = open
+                        └─ gen=0 op=random_init (root)
+                    parent[1] = sub(returns,vwap)
+                    └─ gen=3 op=crossover parents=2
+                        parent[0] = sub(returns,open)
+                        └─ gen=1 op=random_inject (root)
+                        parent[1] = vwap
+                        └─ gen=0 op=random_init (root)
+
+[8] factor=ga_g008_0000 | fitness=1.2284
+    expr   = delay[5](delay[3](sub(returns,vwap)))
+    └─ gen=4 op=crossover parents=2
+        parent[0] = delay[5](delay[3](vwap))
+        └─ gen=1 op=crossover+mutate mutate=delay parents=2
+            parent[0] = ts_std[10](rank(returns))
+            └─ gen=0 op=random_init (root)
+            parent[1] = ts_rank[3](log_abs(low))
+            └─ gen=0 op=random_init (root)
+        parent[1] = sub(returns,vwap)
+        └─ gen=3 op=crossover parents=2
+            parent[0] = sub(returns,open)
+            └─ gen=1 op=random_inject (root)
+            parent[1] = vwap
+            └─ gen=0 op=random_init (root)
+
+[9] factor=ga_g014_0017 | fitness=1.2264
+    expr   = delay[5](delay[30](sub(returns,vwap)))
+    └─ gen=14 op=mutate mutate=delay parents=1
+        parent[0] = delay[5](delay[3](sub(returns,vwap)))
+        └─ gen=4 op=crossover parents=2
+            parent[0] = delay[5](delay[3](vwap))
+            └─ gen=1 op=crossover+mutate mutate=delay parents=2
+                parent[0] = ts_std[10](rank(returns))
+                └─ gen=0 op=random_init (root)
+                parent[1] = ts_rank[3](log_abs(low))
+                └─ gen=0 op=random_init (root)
+            parent[1] = sub(returns,vwap)
+            └─ gen=3 op=crossover parents=2
+                parent[0] = sub(returns,open)
+                └─ gen=1 op=random_inject (root)
+                parent[1] = vwap
+                └─ gen=0 op=random_init (root)
+
+[10] factor=ga_g011_0014 | fitness=1.1980
+    expr   = delay[20](delay[3](sub(returns,vwap)))
+    └─ gen=11 op=mutate mutate=delay parents=1
+        parent[0] = delay[5](delay[3](sub(returns,vwap)))
+        └─ gen=4 op=crossover parents=2
+            parent[0] = delay[5](delay[3](vwap))
+            └─ gen=1 op=crossover+mutate mutate=delay parents=2
+                parent[0] = ts_std[10](rank(returns))
+                └─ gen=0 op=random_init (root)
+                parent[1] = ts_rank[3](log_abs(low))
+                └─ gen=0 op=random_init (root)
+            parent[1] = sub(returns,vwap)
+            └─ gen=3 op=crossover parents=2
+                parent[0] = sub(returns,open)
+                └─ gen=1 op=random_inject (root)
+                parent[1] = vwap
+                └─ gen=0 op=random_init (root)

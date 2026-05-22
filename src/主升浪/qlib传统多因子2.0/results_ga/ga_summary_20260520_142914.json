@@ -1,0 +1,21 @@
+{
+  "population_size": 50,
+  "generations": 20,
+  "archive_size": 63,
+  "lineage_records": 613,
+  "unique_expressions": 1186,
+  "operation_counts": {
+    "crossover": 275,
+    "random_init": 128,
+    "mutate": 75,
+    "random_inject": 70,
+    "crossover+mutate": 65
+  },
+  "exported": 4,
+  "selected_factors": [
+    "ga_final_0000",
+    "ga_final_0016",
+    "ga_final_0027",
+    "ga_final_0047"
+  ]
+}

@@ -1,0 +1,11 @@
+﻿factor,function,path,expression
+mwega_final_0001,compute_mwega_1779417203_001,D:\pythonProject\sdufe-qlib\source\factors\custom\compute_mwega_1779417203_001.py,"AND(big_up,THEN[(3, 3)](break_ma20_down,NOT(big_bull_candle)))"
+mwega_final_0013,compute_mwega_1779417203_002,D:\pythonProject\sdufe-qlib\source\factors\custom\compute_mwega_1779417203_002.py,"AND(big_up,doji_like)"
+mwega_final_0000,compute_mwega_1779417203_003,D:\pythonProject\sdufe-qlib\source\factors\custom\compute_mwega_1779417203_003.py,WITHOUT[10](higher_low)
+mwega_final_0038,compute_mwega_1779417203_004,D:\pythonProject\sdufe-qlib\source\factors\custom\compute_mwega_1779417203_004.py,"AND(ma_bull_order,AND(COUNT_GE[(20, 2)](big_up),WITHOUT[5](big_down)))"
+mwega_final_0010,compute_mwega_1779417203_005,D:\pythonProject\sdufe-qlib\source\factors\custom\compute_mwega_1779417203_005.py,"AND(big_bear_candle,THEN[(1, 10)](THEN[(3, 5)](near_limit_up,WITHOUT[3](big_up)),consecutive_down))"
+mwega_final_0028,compute_mwega_1779417203_006,D:\pythonProject\sdufe-qlib\source\factors\custom\compute_mwega_1779417203_006.py,restart_big_up
+mwega_final_0032,compute_mwega_1779417203_007,D:\pythonProject\sdufe-qlib\source\factors\custom\compute_mwega_1779417203_007.py,big_up
+mwega_final_0002,compute_mwega_1779417203_008,D:\pythonProject\sdufe-qlib\source\factors\custom\compute_mwega_1779417203_008.py,"AND(NOT(volume_breakout),THEN[(3, 10)](WITHOUT[5](big_bull_candle),WITHOUT[20](lower_shadow_on_ma)))"
+mwega_final_0033,compute_mwega_1779417203_009,D:\pythonProject\sdufe-qlib\source\factors\custom\compute_mwega_1779417203_009.py,big_bull_candle
+mwega_final_0014,compute_mwega_1779417203_010,D:\pythonProject\sdufe-qlib\source\factors\custom\compute_mwega_1779417203_010.py,"THEN[(2, 10)](AND(WITHOUT[10](close_near_high),COUNT_GE[(3, 1)](ma5_above_ma10)),AND(volume_double,pullback_not_break_ma20))"

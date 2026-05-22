@@ -1,0 +1,28 @@
+{
+  "provider_uri": "d:/pythonProject/sdufe-qlib/source/qlib-data数据下载/cn_data",
+  "market": "all",
+  "benchmark": "SH000300",
+  "start_time": "2024-11-01",
+  "end_time": "2026-04-30",
+  "enable_market_data_cache": true,
+  "market_data_cache_dir": ".market_data_cache_custom",
+  "factor_libraries": [
+    "custom"
+  ],
+  "future_return_mode": "max_close",
+  "holding_period": 14,
+  "quantiles": 5,
+  "enable_price_filter": true,
+  "min_close_price": 2.0,
+  "max_close_price": 15.0,
+  "price_filter_mode": "last",
+  "enable_market_cap_filter": true,
+  "min_market_cap_yi": 20.0,
+  "max_market_cap_yi": 150.0,
+  "market_cap_kind": "total",
+  "market_cap_cache_max_age_days": 30,
+  "force_refresh_market_cap_cache": false,
+  "enable_factor_cache": true,
+  "factor_cache_dir": ".factor_cache_custom",
+  "output_dir": "results_custom"
+}
