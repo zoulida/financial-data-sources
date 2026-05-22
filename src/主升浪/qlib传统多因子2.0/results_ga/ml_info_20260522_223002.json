@@ -1,0 +1,253 @@
+{
+  "mode": "all",
+  "n_factors": 8,
+  "ml": {
+    "mode": "ml",
+    "models": [
+      "lightgbm",
+      "ridge",
+      "lasso"
+    ],
+    "by_model": {
+      "lightgbm": {
+        "model_name": "lightgbm",
+        "n_train": 359385,
+        "n_valid": 71630,
+        "n_test": 17290,
+        "n_features": 8,
+        "feature_columns": [
+          "ga_final_0001",
+          "ga_final_0000",
+          "ga_final_0012",
+          "ga_final_0027",
+          "ga_final_0023",
+          "ga_final_0031",
+          "ga_final_0043",
+          "ga_final_0045"
+        ],
+        "feature_importance": {
+          "ga_final_0001": 578.1091131959528,
+          "ga_final_0000": 115.87040025189822,
+          "ga_final_0012": 1057.9419225849379,
+          "ga_final_0027": 121.1243197960332,
+          "ga_final_0023": 417.33275183322,
+          "ga_final_0031": 12.903572805787007,
+          "ga_final_0043": 53.95146489769104,
+          "ga_final_0045": 70.20469549405061
+        },
+        "best_iteration": 428,
+        "walk_forward": {
+          "enabled": true,
+          "n_windows": 4,
+          "step_days": 30,
+          "train_days": 720,
+          "valid_days": 90,
+          "windows": [
+            {
+              "window": 1,
+              "train_start": "2024-11-01",
+              "train_end": "2025-10-13",
+              "valid_end": "2026-01-11",
+              "test_start": "2026-01-12",
+              "test_end": "2026-02-10",
+              "data_min_date": "2024-11-01",
+              "n_train": 282815,
+              "n_valid": 76570,
+              "n_test": 88920
+            },
+            {
+              "window": 2,
+              "train_start": "2024-11-01",
+              "train_end": "2025-11-12",
+              "valid_end": "2026-02-10",
+              "test_start": "2026-02-11",
+              "test_end": "2026-03-12",
+              "data_min_date": "2024-11-01",
+              "n_train": 309985,
+              "n_valid": 76570,
+              "n_test": 61750
+            },
+            {
+              "window": 3,
+              "train_start": "2024-11-01",
+              "train_end": "2025-12-12",
+              "valid_end": "2026-03-12",
+              "test_start": "2026-03-13",
+              "test_end": "2026-04-11",
+              "data_min_date": "2024-11-01",
+              "n_train": 337155,
+              "n_valid": 69160,
+              "n_test": 41990
+            },
+            {
+              "window": 4,
+              "train_start": "2024-11-01",
+              "train_end": "2026-01-11",
+              "valid_end": "2026-04-11",
+              "test_start": "2026-04-12",
+              "test_end": "2026-04-30",
+              "data_min_date": "2024-11-01",
+              "n_train": 359385,
+              "n_valid": 71630,
+              "n_test": 17290
+            }
+          ]
+        },
+        "n_features_after_filter": 8,
+        "min_non_null_ratio": 0.3
+      },
+      "ridge": {
+        "model_name": "ridge",
+        "n_train": 359385,
+        "n_valid": 71630,
+        "n_test": 17290,
+        "n_features": 8,
+        "feature_columns": [
+          "ga_final_0001",
+          "ga_final_0000",
+          "ga_final_0012",
+          "ga_final_0027",
+          "ga_final_0023",
+          "ga_final_0031",
+          "ga_final_0043",
+          "ga_final_0045"
+        ],
+        "walk_forward": {
+          "enabled": true,
+          "n_windows": 4,
+          "step_days": 30,
+          "train_days": 720,
+          "valid_days": 90,
+          "windows": [
+            {
+              "window": 1,
+              "train_start": "2024-11-01",
+              "train_end": "2025-10-13",
+              "valid_end": "2026-01-11",
+              "test_start": "2026-01-12",
+              "test_end": "2026-02-10",
+              "data_min_date": "2024-11-01",
+              "n_train": 282815,
+              "n_valid": 76570,
+              "n_test": 88920
+            },
+            {
+              "window": 2,
+              "train_start": "2024-11-01",
+              "train_end": "2025-11-12",
+              "valid_end": "2026-02-10",
+              "test_start": "2026-02-11",
+              "test_end": "2026-03-12",
+              "data_min_date": "2024-11-01",
+              "n_train": 309985,
+              "n_valid": 76570,
+              "n_test": 61750
+            },
+            {
+              "window": 3,
+              "train_start": "2024-11-01",
+              "train_end": "2025-12-12",
+              "valid_end": "2026-03-12",
+              "test_start": "2026-03-13",
+              "test_end": "2026-04-11",
+              "data_min_date": "2024-11-01",
+              "n_train": 337155,
+              "n_valid": 69160,
+              "n_test": 41990
+            },
+            {
+              "window": 4,
+              "train_start": "2024-11-01",
+              "train_end": "2026-01-11",
+              "valid_end": "2026-04-11",
+              "test_start": "2026-04-12",
+              "test_end": "2026-04-30",
+              "data_min_date": "2024-11-01",
+              "n_train": 359385,
+              "n_valid": 71630,
+              "n_test": 17290
+            }
+          ]
+        },
+        "n_features_after_filter": 8,
+        "min_non_null_ratio": 0.3
+      },
+      "lasso": {
+        "model_name": "lasso",
+        "n_train": 359385,
+        "n_valid": 71630,
+        "n_test": 17290,
+        "n_features": 8,
+        "feature_columns": [
+          "ga_final_0001",
+          "ga_final_0000",
+          "ga_final_0012",
+          "ga_final_0027",
+          "ga_final_0023",
+          "ga_final_0031",
+          "ga_final_0043",
+          "ga_final_0045"
+        ],
+        "walk_forward": {
+          "enabled": true,
+          "n_windows": 4,
+          "step_days": 30,
+          "train_days": 720,
+          "valid_days": 90,
+          "windows": [
+            {
+              "window": 1,
+              "train_start": "2024-11-01",
+              "train_end": "2025-10-13",
+              "valid_end": "2026-01-11",
+              "test_start": "2026-01-12",
+              "test_end": "2026-02-10",
+              "data_min_date": "2024-11-01",
+              "n_train": 282815,
+              "n_valid": 76570,
+              "n_test": 88920
+            },
+            {
+              "window": 2,
+              "train_start": "2024-11-01",
+              "train_end": "2025-11-12",
+              "valid_end": "2026-02-10",
+              "test_start": "2026-02-11",
+              "test_end": "2026-03-12",
+              "data_min_date": "2024-11-01",
+              "n_train": 309985,
+              "n_valid": 76570,
+              "n_test": 61750
+            },
+            {
+              "window": 3,
+              "train_start": "2024-11-01",
+              "train_end": "2025-12-12",
+              "valid_end": "2026-03-12",
+              "test_start": "2026-03-13",
+              "test_end": "2026-04-11",
+              "data_min_date": "2024-11-01",
+              "n_train": 337155,
+              "n_valid": 69160,
+              "n_test": 41990
+            },
+            {
+              "window": 4,
+              "train_start": "2024-11-01",
+              "train_end": "2026-01-11",
+              "valid_end": "2026-04-11",
+              "test_start": "2026-04-12",
+              "test_end": "2026-04-30",
+              "data_min_date": "2024-11-01",
+              "n_train": 359385,
+              "n_valid": 71630,
+              "n_test": 17290
+            }
+          ]
+        },
+        "n_features_after_filter": 8,
+        "min_non_null_ratio": 0.3
+      }
+    }
+  }
+}

@@ -1,0 +1,9 @@
+﻿factor,function,path,expression
+ga_final_0001,compute_ga_1779459390_001,D:\pythonProject\数据源\src\主升浪\factors\custom\compute_ga_1779459390_001.py,rank(delay[20](ts_mean[3](low)))
+ga_final_0000,compute_ga_1779459390_002,D:\pythonProject\数据源\src\主升浪\factors\custom\compute_ga_1779459390_002.py,"safe_div(zscore_cs(log_abs(close)),log_abs(delta[10](low)))"
+ga_final_0012,compute_ga_1779459390_003,D:\pythonProject\数据源\src\主升浪\factors\custom\compute_ga_1779459390_003.py,"covariance[30](returns,log_abs(close))"
+ga_final_0027,compute_ga_1779459390_004,D:\pythonProject\数据源\src\主升浪\factors\custom\compute_ga_1779459390_004.py,ts_std[10](rank(returns))
+ga_final_0023,compute_ga_1779459390_005,D:\pythonProject\数据源\src\主升浪\factors\custom\compute_ga_1779459390_005.py,rank(volume)
+ga_final_0031,compute_ga_1779459390_006,D:\pythonProject\数据源\src\主升浪\factors\custom\compute_ga_1779459390_006.py,ts_std[10](rank(demean(high)))
+ga_final_0043,compute_ga_1779459390_007,D:\pythonProject\数据源\src\主升浪\factors\custom\compute_ga_1779459390_007.py,"zscore_cs(correlation[30](low,max(open,-0.5)))"
+ga_final_0045,compute_ga_1779459390_008,D:\pythonProject\数据源\src\主升浪\factors\custom\compute_ga_1779459390_008.py,"covariance[60](log_abs(scale(amount)),rank(low))"

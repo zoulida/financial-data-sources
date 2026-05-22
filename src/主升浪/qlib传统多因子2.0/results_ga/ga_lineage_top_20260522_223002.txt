@@ -1,0 +1,118 @@
+# GA Lineage Top 10
+
+
+[1] factor=ga_g003_0064 | fitness=1.2055
+    expr   = safe_div(zscore_cs(log_abs(close)),log_abs(delta[10](low)))
+    └─ gen=3 op=crossover parents=2
+        parent[0] = safe_div(zscore_cs(log_abs(close)),zscore_cs(low))
+        └─ gen=2 op=random_inject (root)
+        parent[1] = log_abs(delta[10](low))
+        └─ gen=0 op=random_init (root)
+
+[2] factor=ga_g007_0001 | fitness=1.1251
+    expr   = rank(delay[20](ts_mean[3](low)))
+    └─ gen=6 op=crossover parents=2
+        parent[0] = rank(volume)
+        └─ gen=2 op=random_inject (root)
+        parent[1] = delay[20](ts_mean[3](low))
+        └─ gen=5 op=mutate mutate=delay parents=1
+            parent[0] = delay[20](ts_mean[3](log_abs(returns)))
+            └─ gen=3 op=crossover+mutate mutate=delay parents=2
+                parent[0] = open
+                └─ gen=0 op=random_init (root)
+                parent[1] = delay[20](ts_mean[3](log_abs(volume)))
+                └─ gen=2 op=crossover parents=2
+                    parent[0] = delay[20](volume)
+                    └─ gen=1 op=random_inject (root)
+                    parent[1] = ts_mean[3](log_abs(volume))
+                    └─ gen=0 op=random_init (root)
+
+[3] factor=ga_g007_0002 | fitness=1.1250
+    expr   = delay[20](ts_mean[3](low))
+    └─ gen=5 op=mutate mutate=delay parents=1
+        parent[0] = delay[20](ts_mean[3](log_abs(returns)))
+        └─ gen=3 op=crossover+mutate mutate=delay parents=2
+            parent[0] = open
+            └─ gen=0 op=random_init (root)
+            parent[1] = delay[20](ts_mean[3](log_abs(volume)))
+            └─ gen=2 op=crossover parents=2
+                parent[0] = delay[20](volume)
+                └─ gen=1 op=random_inject (root)
+                parent[1] = ts_mean[3](log_abs(volume))
+                └─ gen=0 op=random_init (root)
+
+[4] factor=ga_g003_0057 | fitness=1.1163
+    expr   = delay[20](rank(zscore_cs(open)))
+    └─ gen=3 op=crossover parents=2
+        parent[0] = delay[20](volume)
+        └─ gen=1 op=random_inject (root)
+        parent[1] = rank(zscore_cs(open))
+        └─ gen=2 op=crossover parents=2
+            parent[0] = rank(amount)
+            └─ gen=0 op=random_init (root)
+            parent[1] = zscore_cs(open)
+            └─ gen=1 op=crossover+mutate mutate=zscore_cs parents=2
+                parent[0] = covariance[60](log_abs(scale(amount)),rank(low))
+                └─ gen=0 op=random_init (root)
+                parent[1] = zscore_cs(returns)
+                └─ gen=0 op=random_init (root)
+
+[5] factor=ga_g003_0046 | fitness=1.1157
+    expr   = delay[20](ts_mean[3](ts_min[3](vwap)))
+    └─ gen=3 op=crossover parents=2
+        parent[0] = delay[20](ts_mean[3](log_abs(volume)))
+        └─ gen=2 op=crossover parents=2
+            parent[0] = delay[20](volume)
+            └─ gen=1 op=random_inject (root)
+            parent[1] = ts_mean[3](log_abs(volume))
+            └─ gen=0 op=random_init (root)
+        parent[1] = ts_min[3](vwap)
+        └─ gen=0 op=random_init (root)
+
+[6] factor=ga_g008_0042 | fitness=1.1111
+    expr   = delay[20](vwap)
+    └─ gen=8 op=crossover parents=2
+        parent[0] = delay[20](volume)
+        └─ gen=1 op=random_inject (root)
+        parent[1] = vwap
+        └─ gen=0 op=random_init (root)
+
+[7] factor=ga_g002_0045 | fitness=1.0863
+    expr   = rank(ts_min[10](ts_min[20](open)))
+    └─ gen=2 op=crossover parents=2
+        parent[0] = rank(amount)
+        └─ gen=0 op=random_init (root)
+        parent[1] = ts_min[10](ts_min[20](open))
+        └─ gen=1 op=crossover parents=2
+            parent[0] = ts_min[10](open)
+            └─ gen=0 op=random_init (root)
+            parent[1] = ts_min[20](open)
+            └─ gen=0 op=random_init (root)
+
+[8] factor=ga_g001_0051 | fitness=1.0858
+    expr   = ts_min[10](ts_min[20](open))
+    └─ gen=1 op=crossover parents=2
+        parent[0] = ts_min[10](open)
+        └─ gen=0 op=random_init (root)
+        parent[1] = ts_min[20](open)
+        └─ gen=0 op=random_init (root)
+
+[9] factor=ga_g003_0032 | fitness=1.0799
+    expr   = ts_min[30](vwap)
+    └─ gen=3 op=crossover+mutate mutate=ts_min parents=2
+        parent[0] = close
+        └─ gen=0 op=random_init (root)
+        parent[1] = covariance[30](amount,ts_rank[3](log_abs(low)))
+        └─ gen=1 op=crossover parents=2
+            parent[0] = covariance[30](amount,close)
+            └─ gen=0 op=random_init (root)
+            parent[1] = ts_rank[3](log_abs(low))
+            └─ gen=0 op=random_init (root)
+
+[10] factor=ga_g007_0007 | fitness=1.0787
+    expr   = ts_min[20](ts_min[10](open))
+    └─ gen=6 op=crossover parents=2
+        parent[0] = ts_min[20](open)
+        └─ gen=0 op=random_init (root)
+        parent[1] = ts_min[10](open)
+        └─ gen=0 op=random_init (root)
