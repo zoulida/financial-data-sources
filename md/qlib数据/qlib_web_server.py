@@ -2,13 +2,11 @@ import json
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
-from qlib_config import ALLOW_CUSTOM_COMMAND
 from qlib_reader import dataframe_to_records, get_calendar, get_features, get_instruments
 from qlib_tasks import (
-    create_check_env_task,
-    create_command_task,
     create_download_sample_task,
     current_status,
+    get_task,
     get_download_command,
     list_tasks,
     read_task_log,
@@ -31,6 +29,8 @@ INDEX_HTML = r"""
     button { border: 0; border-radius: 10px; background: #2563eb; color: white; padding: 10px 14px; cursor: pointer; margin: 4px 6px 4px 0; }
     button.secondary { background: #475569; }
     button.danger { background: #dc2626; }
+    button.big { font-size: 20px; padding: 18px 32px; border-radius: 14px; box-shadow: 0 8px 20px rgba(37, 99, 235, 0.35); }
+    button.big:disabled { background: #94a3b8; box-shadow: none; cursor: not-allowed; }
     input, textarea { width: 100%; box-sizing: border-box; border: 1px solid #cbd5e1; border-radius: 10px; padding: 10px; font-family: Consolas, monospace; }
     pre { background: #0f172a; color: #d1fae5; padding: 14px; border-radius: 12px; overflow: auto; max-height: 460px; }
     table { width: 100%; border-collapse: collapse; }
@@ -46,7 +46,7 @@ INDEX_HTML = r"""
 <body>
   <header>
     <h1>Qlib 数据下载工具</h1>
-    <p>明确展示下载命令、下载进度、实时日志和最终成功/失败结论。</p>
+    <p>点击下载后，只显示当前这一次任务的进度、实时日志和最终结论。</p>
   </header>
   <main>
     <section class="grid">
@@ -54,20 +54,22 @@ INDEX_HTML = r"""
         <h2>下载状态</h2>
         <div id="status">加载中...</div>
         <button onclick="refreshAll()">刷新状态</button>
-        <button class="secondary" onclick="showHelp()">API 说明</button>
       </div>
       <div class="card">
         <h2>一键下载</h2>
-        <button onclick="postTask('/api/tasks/check-env')">检查环境</button>
-        <button onclick="postTask('/api/tasks/download-sample')">开始下载 Qlib 数据</button>
+        <p>普通下载：已有完整数据则不重复下载。</p>
+        <button id="downloadButton" class="big" onclick="startDownload(false)">⬇ 下载 Qlib 数据</button>
+        <p>强制更新：删除旧数据后重新下载最新数据。</p>
+        <button id="forceButton" class="big danger" onclick="startDownload(true)">🔄 强制更新最新数据</button>
       </div>
     </section>
 
     <section class="card" style="margin-top:16px;">
       <h2>下载命令</h2>
-      <p>建议直接运行这个包装命令，它会输出进度并在最后告诉你是否成功：</p>
+      <p>当前默认数据源：chenditc/investment_data GitHub Release 镜像。</p>
+      <p>建议直接运行这个镜像下载命令，它会输出进度并在最后告诉你是否成功：</p>
       <div class="cmd" id="localCommand">加载中...</div>
-      <p>实际调用的 Qlib 官方下载命令：</p>
+      <p>备用：Qlib 官方演示数据命令（只到 2020）：</p>
       <div class="cmd" id="officialCommand">加载中...</div>
     </section>
 
@@ -79,19 +81,8 @@ INDEX_HTML = r"""
     </section>
 
     <section class="card" style="margin-top:16px;">
-      <h2>高级：自定义命令</h2>
-      <textarea id="command" rows="3">python -m qlib.run.get_data qlib_data --target_dir ./qlib_data/cn_data --region cn</textarea>
-      <button onclick="runCommand()">执行命令</button>
-    </section>
-
-    <section class="card" style="margin-top:16px;">
-      <h2>任务列表</h2>
-      <div id="tasks"></div>
-    </section>
-
-    <section class="card" style="margin-top:16px;">
-      <h2>日志 / API 输出</h2>
-      <pre id="log">请选择任务或点击 API 说明。</pre>
+      <h2>当前下载日志</h2>
+      <pre id="log">尚未开始下载。点击“开始下载 Qlib 数据”后，这里只显示当前任务日志。</pre>
     </section>
   </main>
 <script>
@@ -100,51 +91,77 @@ async function api(path, options = {}) {
   return await resp.json();
 }
 function mark(v) { return v ? '<span class="ok">是</span>' : '<span class="bad">否</span>'; }
+let activeTaskId = null;
+let activeTaskFinished = false;
+
 async function refreshStatus() {
   const data = await api('/api/status');
-  document.getElementById('localCommand').textContent = data.download_command.local_command;
+  document.getElementById('localCommand').textContent = data.download_command.mirror_command;
   document.getElementById('officialCommand').textContent = data.download_command.official_command;
-  const latest = data.latest_task;
-  if (latest) {
-    document.getElementById('progressBar').style.width = (latest.progress_percent || 0) + '%';
-    document.getElementById('progressText').textContent = `进度 ${latest.progress_percent || 0}%：${latest.progress_text || latest.status}`;
-    document.getElementById('resultText').textContent = latest.result_message || '任务执行中，暂无最终结论';
-    document.getElementById('resultText').className = latest.success === true ? 'result ok' : (latest.success === false ? 'result bad' : 'result');
-  }
   document.getElementById('status').innerHTML = `
     <p>pyqlib 已安装：${mark(data.qlib_installed)}</p>
     <p>数据目录：<code>${data.provider_uri}</code></p>
     <p>数据目录存在：${mark(data.provider_exists)}</p>
-    <p>运行中任务：${data.running_tasks_count}</p>
-    <p>最近任务：${latest ? latest.name + ' / ' + latest.status : '无'}</p>`;
+    <p>当前数据最新日期：<strong>${data.latest_calendar_date || '暂无数据'}</strong></p>
+    <p>镜像最新 release：<strong>${data.mirror_release && data.mirror_release.tag_name ? data.mirror_release.tag_name : '读取中/读取失败'}</strong></p>
+    <p>本地数据文件数：${data.qlib_verify ? data.qlib_verify.files_count : 0}</p>
+    <p>当前任务：${activeTaskId ? activeTaskId : '尚未开始'}</p>`;
 }
-async function refreshTasks() {
-  const data = await api('/api/tasks');
-  const rows = data.tasks.map(t => `<tr><td>${t.task_id}</td><td>${t.name}</td><td>${t.status}</td><td>${t.progress_percent || 0}%</td><td>${t.progress_text || ''}</td><td>${t.result_message || ''}</td><td><button onclick="showLog('${t.task_id}')">日志</button></td></tr>`).join('');
-  document.getElementById('tasks').innerHTML = `<table><thead><tr><th>ID</th><th>名称</th><th>状态</th><th>进度</th><th>阶段</th><th>结论</th><th>操作</th></tr></thead><tbody>${rows}</tbody></table>`;
+
+function renderTask(task) {
+  document.getElementById('progressBar').style.width = (task.progress_percent || 0) + '%';
+  document.getElementById('progressText').textContent = `进度 ${task.progress_percent || 0}%：${task.progress_text || task.status}`;
+  document.getElementById('resultText').textContent = task.result_message || '当前任务运行中，暂无最终结论';
+  document.getElementById('resultText').className = task.success === true ? 'result ok' : (task.success === false ? 'result bad' : 'result');
+  activeTaskFinished = ['success', 'failed'].includes(task.status);
+  document.getElementById('downloadButton').disabled = !activeTaskFinished;
+  document.getElementById('forceButton').disabled = !activeTaskFinished;
 }
-async function refreshAll() { await refreshStatus(); await refreshTasks(); }
-async function postTask(path) {
+
+async function refreshActiveTask() {
+  if (!activeTaskId) {
+    return;
+  }
+  const taskData = await api('/api/tasks/' + activeTaskId);
+  if (taskData.ok && taskData.task) {
+    renderTask(taskData.task);
+  }
+  const logData = await api('/api/tasks/' + activeTaskId + '/log');
+  document.getElementById('log').textContent = logData.log || '当前任务暂无日志。';
+}
+
+async function refreshAll() {
+  await refreshStatus();
+  await refreshActiveTask();
+}
+
+async function startDownload(force) {
+  activeTaskId = null;
+  activeTaskFinished = false;
+  document.getElementById('downloadButton').disabled = true;
+  document.getElementById('forceButton').disabled = true;
+  document.getElementById('progressBar').style.width = '0%';
+  document.getElementById('progressText').textContent = force ? '准备启动强制更新任务...' : '准备启动下载任务...';
+  document.getElementById('resultText').textContent = '当前任务运行中，暂无最终结论';
+  document.getElementById('resultText').className = 'result';
+  document.getElementById('log').textContent = force ? '正在启动强制更新任务...' : '正在启动当前下载任务...';
+  const path = force ? '/api/tasks/force-update' : '/api/tasks/download-sample';
   const data = await api(path, {method: 'POST'});
-  document.getElementById('log').textContent = JSON.stringify(data, null, 2);
-  await refreshAll();
+  if (!data.ok) {
+    document.getElementById('downloadButton').disabled = false;
+    document.getElementById('forceButton').disabled = false;
+    document.getElementById('resultText').textContent = data.error || '启动下载任务失败';
+    document.getElementById('resultText').className = 'result bad';
+    return;
+  }
+  activeTaskId = data.task.task_id;
+  document.getElementById('log').textContent = '当前任务已启动，正在等待日志输出...';
+  await refreshStatus();
+  await refreshActiveTask();
 }
-async function runCommand() {
-  const command = document.getElementById('command').value;
-  const data = await api('/api/tasks/run-command', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({command})});
-  document.getElementById('log').textContent = JSON.stringify(data, null, 2);
-  await refreshAll();
-}
-async function showLog(taskId) {
-  const data = await api('/api/tasks/' + taskId + '/log');
-  document.getElementById('log').textContent = data.log || JSON.stringify(data, null, 2);
-}
-async function showHelp() {
-  const data = await api('/api/help');
-  document.getElementById('log').textContent = JSON.stringify(data, null, 2);
-}
+
 refreshAll();
-setInterval(refreshAll, 5000);
+setInterval(refreshAll, 2000);
 </script>
 </body>
 </html>
@@ -194,6 +211,13 @@ class QlibRequestHandler(BaseHTTPRequestHandler):
             elif path.startswith("/api/tasks/") and path.endswith("/log"):
                 task_id = path.split("/")[3]
                 self._send_json({"ok": True, "task_id": task_id, "log": read_task_log(task_id)})
+            elif path.startswith("/api/tasks/"):
+                task_id = path.split("/")[3]
+                task = get_task(task_id)
+                if task:
+                    self._send_json({"ok": True, "task": task})
+                else:
+                    self._send_json({"ok": False, "error": "任务不存在"}, 404)
             elif path == "/api/qlib/calendar":
                 freq = query.get("freq", ["day"])[0]
                 self._send_json({"ok": True, "data": get_calendar(freq=freq)})
@@ -211,20 +235,10 @@ class QlibRequestHandler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         path = parsed.path
         try:
-            if path == "/api/tasks/check-env":
-                self._send_json({"ok": True, "task": create_check_env_task()})
-            elif path == "/api/tasks/download-sample":
+            if path == "/api/tasks/download-sample":
                 self._send_json({"ok": True, "task": create_download_sample_task()})
-            elif path == "/api/tasks/run-command":
-                if not ALLOW_CUSTOM_COMMAND:
-                    self._send_json({"ok": False, "error": "自定义命令已关闭"}, 403)
-                    return
-                payload = self._read_json()
-                command = str(payload.get("command", "")).strip()
-                if not command:
-                    self._send_json({"ok": False, "error": "命令不能为空"}, 400)
-                    return
-                self._send_json({"ok": True, "task": create_command_task("自定义命令", command)})
+            elif path == "/api/tasks/force-update":
+                self._send_json({"ok": True, "task": create_download_sample_task(force=True)})
             elif path == "/api/qlib/features":
                 payload = self._read_json()
                 df = get_features(
@@ -249,10 +263,10 @@ def help_payload() -> dict:
             "GET /api/status": "服务和数据目录状态",
             "GET /api/download-command": "获取本地包装下载命令和实际 Qlib 官方下载命令",
             "GET /api/tasks": "任务列表",
+            "GET /api/tasks/{task_id}": "当前任务状态",
             "GET /api/tasks/{task_id}/log": "任务日志",
-            "POST /api/tasks/check-env": "检查环境",
             "POST /api/tasks/download-sample": "启动 Qlib 数据下载任务，任务对象含 progress_percent、progress_text、result_message",
-            "POST /api/tasks/run-command": "执行自定义命令，body: {command}",
+            "POST /api/tasks/force-update": "强制删除旧 Qlib 数据并重新下载",
             "GET /api/qlib/calendar?freq=day": "读取交易日历",
             "GET /api/qlib/instruments?market=all": "读取股票列表",
             "POST /api/qlib/features": "读取特征数据，body: {instruments, fields, start_time, end_time, freq}",

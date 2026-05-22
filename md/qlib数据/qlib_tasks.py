@@ -8,7 +8,14 @@ from pathlib import Path
 from uuid import uuid4
 
 from qlib_config import LOG_DIR, get_data_status
-from qlib_downloader import build_local_download_command, build_official_download_command, run_qlib_download
+from qlib_downloader import (
+    build_local_download_command,
+    build_mirror_download_command,
+    build_official_download_command,
+    get_mirror_latest_release,
+    run_mirror_download,
+    verify_qlib_data,
+)
 
 
 @dataclass
@@ -62,6 +69,7 @@ def read_task_log(task_id: str) -> str:
 def get_download_command() -> dict:
     return {
         "local_command": build_local_download_command(),
+        "mirror_command": build_mirror_download_command(),
         "official_command": build_official_download_command(),
     }
 
@@ -127,15 +135,16 @@ def _run_task(task_id: str, command: str, cwd: Path | None = None) -> None:
     )
 
 
-def _run_download_task(task_id: str) -> None:
+def _run_download_task(task_id: str, force: bool = False) -> None:
     task = _TASKS[task_id]
     log_file = Path(task.log_file)
     log_file.parent.mkdir(parents=True, exist_ok=True)
     _set_task_fields(task_id, status="running", started_at=_now(), progress_percent=0, progress_text="准备下载")
     log_file.write_text(
         f"开始时间: {_now()}\n"
+        f"下载模式: {'强制更新' if force else '普通下载'}\n"
         f"本地包装命令: {build_local_download_command()}\n"
-        f"实际下载命令: {build_official_download_command()}\n\n",
+        f"镜像下载命令: {build_mirror_download_command()}\n\n",
         encoding="utf-8",
         errors="replace",
     )
@@ -169,7 +178,7 @@ def _run_download_task(task_id: str) -> None:
                 verify=verify,
             )
 
-    result = run_qlib_download(on_event=on_event)
+    result = run_mirror_download(on_event=on_event, force=force)
     _set_task_fields(
         task_id,
         finished_at=_now(),
@@ -217,12 +226,12 @@ def create_check_env_task() -> dict:
     return create_command_task("检查 Qlib 环境", command, Path(__file__).resolve().parent)
 
 
-def create_download_sample_task() -> dict:
+def create_download_sample_task(force: bool = False) -> dict:
     task_id = datetime.now().strftime("%Y%m%d_%H%M%S_") + uuid4().hex[:8]
     log_file = LOG_DIR / f"{task_id}.log"
     task = TaskInfo(
         task_id=task_id,
-        name="下载 Qlib 中国市场数据",
+        name="强制更新 Qlib 中国市场数据" if force else "下载 Qlib 中国市场数据",
         command=build_local_download_command(),
         status="pending",
         return_code=None,
@@ -234,17 +243,25 @@ def create_download_sample_task() -> dict:
     )
     with _TASK_LOCK:
         _TASKS[task_id] = task
-    thread = threading.Thread(target=_run_download_task, args=(task_id,), daemon=True)
+    thread = threading.Thread(target=_run_download_task, args=(task_id, force), daemon=True)
     thread.start()
     return asdict(task)
 
 
 def current_status() -> dict:
     status = get_data_status()
+    qlib_verify = verify_qlib_data()
+    try:
+        mirror_release = get_mirror_latest_release()
+    except Exception as exc:
+        mirror_release = {"error": str(exc)}
     tasks = list_tasks()
     status.update(
         {
             "download_command": get_download_command(),
+            "qlib_verify": qlib_verify,
+            "latest_calendar_date": qlib_verify.get("latest_calendar_date"),
+            "mirror_release": mirror_release,
             "tasks_count": len(tasks),
             "running_tasks_count": len([item for item in tasks if item["status"] == "running"]),
             "latest_task": tasks[0] if tasks else None,

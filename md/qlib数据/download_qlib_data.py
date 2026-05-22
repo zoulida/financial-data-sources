@@ -1,7 +1,7 @@
 import json
 import sys
 
-from qlib_downloader import build_official_download_command, run_qlib_download
+from qlib_downloader import build_mirror_download_command, build_official_download_command, run_mirror_download, run_qlib_download
 
 
 try:
@@ -21,9 +21,13 @@ def safe_print(value: object = "", **kwargs) -> None:
 
 
 def main() -> int:
+    force = "--force" in sys.argv
+    source = "official" if "--source" in sys.argv and "official" in sys.argv else "mirror"
     safe_print("Qlib 数据下载工具")
+    safe_print(f"下载模式: {'强制更新' if force else '普通下载'}")
+    safe_print(f"数据源: {'investment_data 镜像' if source == 'mirror' else 'Qlib 官方演示数据'}")
     safe_print("实际执行的下载命令:")
-    safe_print(build_official_download_command())
+    safe_print(build_mirror_download_command() if source == "mirror" else build_official_download_command())
     safe_print("-" * 80)
 
     def on_event(event: dict) -> None:
@@ -37,7 +41,10 @@ def main() -> int:
             safe_print(f"[最终结论] {event.get('message', '')}")
             safe_print(json.dumps(event.get("verify", {}), ensure_ascii=False, indent=2))
 
-    result = run_qlib_download(on_event=on_event)
+    if source == "mirror":
+        result = run_mirror_download(on_event=on_event, force=force)
+    else:
+        result = run_qlib_download(on_event=on_event, force=force)
     return 0 if result.get("success") else 1
 
 
