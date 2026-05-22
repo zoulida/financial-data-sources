@@ -22,8 +22,22 @@ if errorlevel 1 (
     exit /b 1
 )
 
+if not exist "%~dp0logs" mkdir "%~dp0logs"
+
+:run_strategy
+echo [%date% %time%] Strategy starting. >> "%~dp0logs\restart.log"
 python "%~dp0run.py" --symbol 162411.SZ --step 0.001 --baseline 1.076 %*
 set EXITCODE=%errorlevel%
+echo [%date% %time%] Strategy exited, code=%EXITCODE%. >> "%~dp0logs\restart.log"
+if not "%EXITCODE%"=="0" (
+    echo.
+    echo ============================================================
+    echo  Strategy exited unexpectedly (code %EXITCODE%).
+    echo  Restarting in 10 seconds. Press Ctrl+C to stop.
+    echo ============================================================
+    timeout /t 10 /nobreak > nul
+    goto run_strategy
+)
 
 popd
 echo.

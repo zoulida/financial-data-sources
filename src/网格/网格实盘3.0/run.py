@@ -16,9 +16,12 @@ from __future__ import annotations
 
 import argparse
 import atexit
+import faulthandler
 import importlib.util
 import sys
+import threading
 import time
+import traceback
 from pathlib import Path
 
 # ============================================================
@@ -61,23 +64,24 @@ from grid_v3.strategy_manager import GridStrategyManager
 class ConsoleLogger:
     """控制台日志 —— 缓冲写入文件，减少 I/O 频率"""
 
-    FLUSH_SIZE = 4096  # 缓冲区阈值（字节）
+    FLUSH_SIZE = 4096
 
     def __init__(self, log_file: Path):
         self.log_file = log_file
         self.log_file.parent.mkdir(parents=True, exist_ok=True)
-        self.log_file_handle = open(log_file, "w", encoding="utf-8")
+        self.log_file_handle = open(log_file, "a", encoding="utf-8")
         self.original_stdout = sys.stdout
         self.original_stderr = sys.stderr
         self.buffer: list[str] = []
         self.buffer_size = 0
+        self._closed = False
 
     def write(self, message: str) -> int:
         self.original_stdout.write(message)
         self.original_stdout.flush()
         self.buffer.append(message)
         self.buffer_size += len(message)
-        if self.buffer_size >= self.FLUSH_SIZE:
+        if "\n" in message or self.buffer_size >= self.FLUSH_SIZE:
             self._flush_to_file()
         return len(message)
 
@@ -93,14 +97,42 @@ class ConsoleLogger:
         self._flush_to_file()
 
     def close(self) -> None:
+        if self._closed:
+            return
         self._flush_to_file()
         self.log_file_handle.close()
+        self._closed = True
         self.original_stdout.write(f"\n日志已保存到: {self.log_file}\n")
 
     def install(self) -> None:
         sys.stdout = self
         sys.stderr = self
         atexit.register(self.close)
+
+
+def _install_exception_hooks() -> None:
+    def _handle_exception(exc_type, exc_value, exc_traceback) -> None:
+        if issubclass(exc_type, KeyboardInterrupt):
+            sys.__excepthook__(exc_type, exc_value, exc_traceback)
+            return
+        print("\n[CRITICAL] 未捕获异常，策略即将退出：")
+        traceback.print_exception(exc_type, exc_value, exc_traceback)
+
+    def _handle_thread_exception(args) -> None:
+        print(f"\n[CRITICAL] 线程未捕获异常: {args.thread.name}")
+        traceback.print_exception(args.exc_type, args.exc_value, args.exc_traceback)
+
+    sys.excepthook = _handle_exception
+    if hasattr(threading, "excepthook"):
+        threading.excepthook = _handle_thread_exception
+
+
+def _install_fault_handler(log_dir: Path):
+    crash_log = log_dir / "crash.log"
+    crash_handle = open(crash_log, "a", encoding="utf-8")
+    faulthandler.enable(file=crash_handle, all_threads=True)
+    atexit.register(crash_handle.close)
+    return crash_handle
 
 
 # ============================================================
@@ -110,9 +142,13 @@ def main(argv: list[str] | None = None) -> int:
     """命令行主入口"""
 
     # ── 日志初始化 ──
-    log_file = Path(__file__).parent / "logs" / "console.log"
+    log_dir = Path(__file__).parent / "logs"
+    log_file = log_dir / "console.log"
     logger = ConsoleLogger(log_file)
     logger.install()
+    _install_exception_hooks()
+    _install_fault_handler(log_dir)
+    print(f"\n========== Grid Strategy 启动: {time.strftime('%Y-%m-%d %H:%M:%S')} ==========")
 
     # ── 参数解析 ──
     parser = argparse.ArgumentParser(description="网格交易策略 v3.0 启动器")
@@ -154,22 +190,22 @@ def main(argv: list[str] | None = None) -> int:
         speed_factor=args.speed_factor,
     )
 
-    # ── 创建策略 ──
-    if not manager.create_strategy():
-        print("创建策略失败，退出程序")
-        return 1
-
-    # ── 订阅行情 / 启动回放 ──
-    if not manager.subscribe_stock_quotes():
-        print("订阅/启动失败，退出程序")
-        return 1
-
-    mode_str = "模拟回放" if args.simulate else "实时行情"
-    print(f"\n策略已启动 ({mode_str})，等待行情数据...")
-    print("按 Ctrl+C 停止策略\n")
-
-    # ── 主循环 ──
     try:
+        # ── 创建策略 ──
+        if not manager.create_strategy():
+            print("创建策略失败，退出程序")
+            return 1
+
+        # ── 订阅行情 / 启动回放 ──
+        if not manager.subscribe_stock_quotes():
+            print("订阅/启动失败，退出程序")
+            return 1
+
+        mode_str = "模拟回放" if args.simulate else "实时行情"
+        print(f"\n策略已启动 ({mode_str})，等待行情数据...")
+        print("按 Ctrl+C 停止策略\n")
+
+        # ── 主循环 ──
         while True:
             time.sleep(0.1)
             # 模拟模式：回放完成后自动退出
@@ -184,6 +220,17 @@ def main(argv: list[str] | None = None) -> int:
             manager.strategy.on_stop()
         manager.unsubscribe_stock_quotes()
         print("策略已停止")
+    except Exception as e:
+        print(f"\n[CRITICAL] 主程序异常退出: {e}")
+        traceback.print_exc()
+        try:
+            if manager.strategy:
+                manager.strategy.on_stop()
+            manager.unsubscribe_stock_quotes()
+        except Exception as cleanup_error:
+            print(f"[CRITICAL] 异常退出清理失败: {cleanup_error}")
+            traceback.print_exc()
+        return 1
 
     return 0
 

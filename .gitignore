@@ -89,6 +89,10 @@ test_result.txt
 data/
 cache/
 
+# Qlib downloaded data
+md/qlib数据/qlib_data/
+md/qlib数据/logs/
+
 # Specific large files
 930997_changes_20240101_20251024.csv
 930997_constituents_20240131.csv
