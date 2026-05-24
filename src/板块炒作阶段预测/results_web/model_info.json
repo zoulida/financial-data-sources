@@ -1,0 +1,103 @@
+{
+  "model_used": "lightgbm",
+  "split_meta": {
+    "train_end": "2025-06-10",
+    "valid_end": "2025-11-26",
+    "test_start": "2025-11-27",
+    "n_dates": 574
+  },
+  "config": {
+    "model": "lightgbm",
+    "train_ratio": 0.6,
+    "valid_ratio": 0.2,
+    "num_leaves": 63,
+    "max_depth": -1,
+    "learning_rate": 0.05,
+    "min_data_in_leaf": 50,
+    "feature_fraction": 0.9,
+    "bagging_fraction": 0.9,
+    "bagging_freq": 5,
+    "lambda_l1": 0.0,
+    "lambda_l2": 1.0,
+    "num_boost_round": 800,
+    "early_stopping_rounds": 50,
+    "num_threads": 8,
+    "random_state": 20260522,
+    "use_class_weight": true,
+    "feature_blacklist": []
+  },
+  "train_info": {
+    "best_iteration": 61,
+    "class_weight": {
+      "0": 7.361722488038278,
+      "1": 9.058581100971445,
+      "2": 9.058581100971445,
+      "3": 0.2744706281106731
+    }
+  },
+  "test_eval": {
+    "confusion_matrix": [
+      [
+        669,
+        42,
+        21,
+        262
+      ],
+      [
+        11,
+        569,
+        745,
+        16
+      ],
+      [
+        2,
+        54,
+        556,
+        5
+      ],
+      [
+        6153,
+        1436,
+        989,
+        30989
+      ]
+    ],
+    "labels": [
+      "预备炒作",
+      "正在炒作",
+      "炒作末期",
+      "冷门板块"
+    ],
+    "per_class": {
+      "预备炒作": {
+        "precision": 0.09787856620336503,
+        "recall": 0.6730382293762576,
+        "f1": 0.17090305275258655,
+        "support": 994
+      },
+      "正在炒作": {
+        "precision": 0.27082341742027605,
+        "recall": 0.424310216256525,
+        "f1": 0.3306217315514236,
+        "support": 1341
+      },
+      "炒作末期": {
+        "precision": 0.2405884898312419,
+        "recall": 0.9011345218800648,
+        "f1": 0.37978142076502736,
+        "support": 617
+      },
+      "冷门板块": {
+        "precision": 0.9909503709388591,
+        "recall": 0.7832031743624738,
+        "f1": 0.8749135363288584,
+        "support": 39567
+      }
+    },
+    "accuracy": 0.7710200145817164,
+    "macro_f1": 0.43905493534947393,
+    "balanced_accuracy": 0.6954215354688302,
+    "n_samples": 42519
+  },
+  "latest_date": "2026-05-22"
+}

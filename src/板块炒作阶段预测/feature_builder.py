@@ -267,3 +267,91 @@ def build_sector_feature_table(
         len(rows), feature_long.shape[1], feature_long.shape[0],
     )
     return feature_long, intermediates
+
+
+def build_sector_feature_table_from_sector_panel(
+    sector_panel: Mapping[str, pd.DataFrame],
+    member_counts: Mapping[str, int] | None = None,
+    config: FeatureConfig | None = None,
+) -> Tuple[pd.DataFrame, Dict[str, pd.DataFrame]]:
+    config = config or FeatureConfig()
+    member_counts = member_counts or {}
+
+    close = sector_panel["close"]
+    amount = sector_panel.get("amount")
+    if amount is None:
+        amount = close * sector_panel.get("volume", close * np.nan)
+
+    returns = close.pct_change(fill_method=None).replace([np.inf, -np.inf], np.nan)
+    market_ret = returns.mean(axis=1, skipna=True)
+    market_amount = amount.sum(axis=1, min_count=1)
+
+    sector_ret_dict: Dict[str, pd.Series] = {}
+    sector_amount_dict: Dict[str, pd.Series] = {}
+    rows: List[pd.DataFrame] = []
+
+    for sector_name in returns.columns:
+        sector_ret = returns[sector_name]
+        if sector_ret.notna().sum() < max(10, config.amount_baseline_window // 2):
+            LOGGER.debug("跳过 %s（板块K线有效样本不足）", sector_name)
+            continue
+
+        sector_excess = sector_ret - market_ret
+        sector_amount = amount[sector_name]
+        amount_share = sector_amount / market_amount.replace(0.0, np.nan)
+        amount_ratio = _rolling_amount_ratio(sector_amount, config.amount_baseline_window)
+
+        feats: Dict[str, pd.Series] = {}
+        for w in list(config.short_windows) + list(config.mid_windows):
+            feats[f"past_ret_{w}d"] = _rolling_cum_return(sector_ret, w)
+            feats[f"past_excess_{w}d"] = _rolling_cum_return(sector_excess, w)
+
+        feats["amount_share"] = amount_share
+        feats[f"amount_ratio_{config.amount_baseline_window}d"] = amount_ratio
+        for w in config.short_windows:
+            feats[f"amount_share_mean_{w}d"] = amount_share.rolling(w, min_periods=2).mean()
+            feats[f"amount_ratio_mean_{w}d"] = amount_ratio.rolling(w, min_periods=2).mean()
+
+        for w in config.short_windows + list(config.mid_windows):
+            feats[f"volatility_{w}d"] = sector_ret.rolling(w, min_periods=max(3, w // 2)).std()
+            feats[f"max_drawdown_{w}d"] = _rolling_max_drawdown(sector_ret, w)
+
+        feats["sector_ret_1d"] = sector_ret
+        feats["sector_excess_1d"] = sector_excess
+        feats["market_ret_1d"] = market_ret
+        feats["n_members"] = pd.Series(float(member_counts.get(str(sector_name), np.nan)), index=sector_ret.index)
+
+        feat_df = pd.DataFrame(feats)
+        feat_df["sector"] = sector_name
+        feat_df = feat_df.set_index("sector", append=True)
+        feat_df.index.set_names(["datetime", "sector"], inplace=True)
+        rows.append(feat_df)
+
+        sector_ret_dict[str(sector_name)] = sector_ret
+        sector_amount_dict[str(sector_name)] = sector_amount
+
+    if not rows:
+        raise ValueError("没有任何板块通过有效样本过滤，无法构造特征")
+
+    feature_long = pd.concat(rows).sort_index()
+    feature_long = feature_long.replace([np.inf, -np.inf], np.nan)
+
+    sector_ret_wide = pd.DataFrame(sector_ret_dict)
+    sector_amount_wide = pd.DataFrame(sector_amount_dict)
+    sector_excess_wide = sector_ret_wide.sub(market_ret, axis=0)
+    amount_share_wide = sector_amount_wide.div(market_amount.replace(0.0, np.nan), axis=0)
+
+    intermediates = {
+        "sector_ret": sector_ret_wide,
+        "sector_excess": sector_excess_wide,
+        "sector_amount": sector_amount_wide,
+        "amount_share": amount_share_wide,
+        "market_ret": market_ret.to_frame(name="market_ret"),
+        "market_amount": market_amount.to_frame(name="market_amount"),
+    }
+
+    LOGGER.info(
+        "OpenTDX 板块K线特征构造完成：%d 个板块，特征 %d 列，长表 %d 行",
+        len(rows), feature_long.shape[1], feature_long.shape[0],
+    )
+    return feature_long, intermediates

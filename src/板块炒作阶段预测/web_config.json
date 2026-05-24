@@ -1,16 +1,27 @@
 {
-  "start_date": "2024-01-18",
-  "end_date": "2026-05-23",
+  "start_date": "2024-01-01",
+  "end_date": "2026-05-24",
+  "data_source": "opentdx",
+  "provider_uri": null,
+  "output_dir": "src/板块炒作阶段预测/results_web",
   "horizon": 10,
   "short_horizon": 5,
   "long_horizon": 20,
   "min_members": 10,
   "max_members": 600,
+  "update_sectors": false,
+  "sector_cache_hours": 24,
+  "sectors": null,
+  "opentdx_root": null,
+  "opentdx_board_types": [
+    "HY",
+    "GN"
+  ],
+  "opentdx_max_boards": null,
+  "opentdx_kline_count": 800,
   "model": "lightgbm",
   "train_ratio": 0.6,
   "valid_ratio": 0.2,
-  "sector_cache_hours": 24,
-  "update_sectors": false,
-  "sectors": [],
-  "provider_uri": ""
+  "snapshot": null,
+  "load_snapshot": null
 }

@@ -1,0 +1,2385 @@
+{
+  "args": {
+    "start_date": "2024-01-01",
+    "end_date": "2026-05-24",
+    "data_source": "opentdx",
+    "provider_uri": null,
+    "output_dir": "src/板块炒作阶段预测/results_web",
+    "horizon": 10,
+    "short_horizon": 5,
+    "long_horizon": 20,
+    "min_members": 10,
+    "max_members": 600,
+    "update_sectors": false,
+    "sector_cache_hours": 24,
+    "sectors": null,
+    "opentdx_root": null,
+    "opentdx_board_types": [
+      "HY",
+      "GN"
+    ],
+    "opentdx_max_boards": null,
+    "opentdx_kline_count": 800,
+    "model": "lightgbm",
+    "train_ratio": 0.6,
+    "valid_ratio": 0.2,
+    "snapshot": null,
+    "load_snapshot": null,
+    "verbose": false
+  },
+  "data_source": "opentdx",
+  "feature_cfg": {
+    "short_windows": [
+      3,
+      5,
+      10
+    ],
+    "mid_windows": [
+      20,
+      60
+    ],
+    "amount_baseline_window": 20,
+    "big_up_threshold": 0.05,
+    "big_down_threshold": -0.05,
+    "near_limit_up_threshold": 0.085,
+    "top_contrib_k": 5,
+    "min_members_for_feature": 5
+  },
+  "label_cfg": {
+    "horizon": 10,
+    "short_horizon": 5,
+    "long_horizon": 20,
+    "high_quantile": 0.75,
+    "very_high_quantile": 0.85,
+    "low_quantile": 0.5,
+    "very_low_quantile": 0.4,
+    "drawdown_strong_negative": -0.1,
+    "fail_future_excess": 0.0,
+    "merge_neutral_to_cold": true,
+    "min_valid_samples_per_day": 10
+  },
+  "model_cfg": {
+    "model": "lightgbm",
+    "train_ratio": 0.6,
+    "valid_ratio": 0.2,
+    "num_leaves": 63,
+    "max_depth": -1,
+    "learning_rate": 0.05,
+    "min_data_in_leaf": 50,
+    "feature_fraction": 0.9,
+    "bagging_fraction": 0.9,
+    "bagging_freq": 5,
+    "lambda_l1": 0.0,
+    "lambda_l2": 1.0,
+    "num_boost_round": 800,
+    "early_stopping_rounds": 50,
+    "num_threads": 8,
+    "random_state": 20260522,
+    "use_class_weight": true,
+    "feature_blacklist": []
+  },
+  "n_sectors": 370,
+  "n_stocks_loaded": 5527,
+  "panel_dates": 575,
+  "opentdx_board_meta": {
+    "元器件": {
+      "code": "881333",
+      "name": "元器件",
+      "board_type": "HY",
+      "member_count": 64
+    },
+    "玻璃玻纤": {
+      "code": "881094",
+      "name": "玻璃玻纤",
+      "board_type": "HY",
+      "member_count": 17
+    },
+    "非金属材料": {
+      "code": "881104",
+      "name": "非金属材料",
+      "board_type": "HY",
+      "member_count": 17
+    },
+    "金属新材料": {
+      "code": "881087",
+      "name": "金属新材料",
+      "board_type": "HY",
+      "member_count": 33
+    },
+    "通信设备": {
+      "code": "881338",
+      "name": "通信设备",
+      "board_type": "HY",
+      "member_count": 90
+    },
+    "其他电子": {
+      "code": "881336",
+      "name": "其他电子",
+      "board_type": "HY",
+      "member_count": 54
+    },
+    "工业金属": {
+      "code": "881071",
+      "name": "工业金属",
+      "board_type": "HY",
+      "member_count": 61
+    },
+    "综合类": {
+      "code": "881478",
+      "name": "综合类",
+      "board_type": "HY",
+      "member_count": 17
+    },
+    "光学光电": {
+      "code": "881329",
+      "name": "光学光电",
+      "board_type": "HY",
+      "member_count": 108
+    },
+    "稀有金属": {
+      "code": "881082",
+      "name": "稀有金属",
+      "board_type": "HY",
+      "member_count": 31
+    },
+    "消费电子": {
+      "code": "881326",
+      "name": "消费电子",
+      "board_type": "HY",
+      "member_count": 104
+    },
+    "化学制品": {
+      "code": "881034",
+      "name": "化学制品",
+      "board_type": "HY",
+      "member_count": 146
+    },
+    "专用设备": {
+      "code": "881303",
+      "name": "专用设备",
+      "board_type": "HY",
+      "member_count": 233
+    },
+    "通用设备": {
+      "code": "881294",
+      "name": "通用设备",
+      "board_type": "HY",
+      "member_count": 253
+    },
+    "环保设备": {
+      "code": "881470",
+      "name": "环保设备",
+      "board_type": "HY",
+      "member_count": 27
+    },
+    "塑料": {
+      "code": "881044",
+      "name": "塑料",
+      "board_type": "HY",
+      "member_count": 95
+    },
+    "橡胶": {
+      "code": "881051",
+      "name": "橡胶",
+      "board_type": "HY",
+      "member_count": 23
+    },
+    "其他发电设备": {
+      "code": "881285",
+      "name": "其他发电设备",
+      "board_type": "HY",
+      "member_count": 25
+    },
+    "自动化设备": {
+      "code": "881313",
+      "name": "自动化设备",
+      "board_type": "HY",
+      "member_count": 79
+    },
+    "轨交设备": {
+      "code": "881293",
+      "name": "轨交设备",
+      "board_type": "HY",
+      "member_count": 33
+    },
+    "半导体": {
+      "code": "881319",
+      "name": "半导体",
+      "board_type": "HY",
+      "member_count": 201
+    },
+    "能源金属": {
+      "code": "881078",
+      "name": "能源金属",
+      "board_type": "HY",
+      "member_count": 16
+    },
+    "电机制造": {
+      "code": "881261",
+      "name": "电机制造",
+      "board_type": "HY",
+      "member_count": 27
+    },
+    "家电零部件": {
+      "code": "881198",
+      "name": "家电零部件",
+      "board_type": "HY",
+      "member_count": 27
+    },
+    "电子商务": {
+      "code": "881207",
+      "name": "电子商务",
+      "board_type": "HY",
+      "member_count": 21
+    },
+    "光伏设备": {
+      "code": "881275",
+      "name": "光伏设备",
+      "board_type": "HY",
+      "member_count": 74
+    },
+    "军工电子": {
+      "code": "881291",
+      "name": "军工电子",
+      "board_type": "HY",
+      "member_count": 59
+    },
+    "贵金属": {
+      "code": "881075",
+      "name": "贵金属",
+      "board_type": "HY",
+      "member_count": 12
+    },
+    "专业服务": {
+      "code": "881436",
+      "name": "专业服务",
+      "board_type": "HY",
+      "member_count": 36
+    },
+    "IT设备": {
+      "code": "881352",
+      "name": "IT设备",
+      "board_type": "HY",
+      "member_count": 66
+    },
+    "农用化工": {
+      "code": "881055",
+      "name": "农用化工",
+      "board_type": "HY",
+      "member_count": 60
+    },
+    "通信工程": {
+      "code": "881347",
+      "name": "通信工程",
+      "board_type": "HY",
+      "member_count": 15
+    },
+    "风电设备": {
+      "code": "881282",
+      "name": "风电设备",
+      "board_type": "HY",
+      "member_count": 32
+    },
+    "文娱用品": {
+      "code": "881180",
+      "name": "文娱用品",
+      "board_type": "HY",
+      "member_count": 19
+    },
+    "装修装饰": {
+      "code": "881416",
+      "name": "装修装饰",
+      "board_type": "HY",
+      "member_count": 24
+    },
+    "贸易": {
+      "code": "881206",
+      "name": "贸易",
+      "board_type": "HY",
+      "member_count": 22
+    },
+    "化学原料": {
+      "code": "881026",
+      "name": "化学原料",
+      "board_type": "HY",
+      "member_count": 81
+    },
+    "汽车零部件": {
+      "code": "881218",
+      "name": "汽车零部件",
+      "board_type": "HY",
+      "member_count": 261
+    },
+    "电网设备": {
+      "code": "881268",
+      "name": "电网设备",
+      "board_type": "HY",
+      "member_count": 144
+    },
+    "环境治理": {
+      "code": "881471",
+      "name": "环境治理",
+      "board_type": "HY",
+      "member_count": 95
+    },
+    "云服务": {
+      "code": "881359",
+      "name": "云服务",
+      "board_type": "HY",
+      "member_count": 40
+    },
+    "水泥": {
+      "code": "881091",
+      "name": "水泥",
+      "board_type": "HY",
+      "member_count": 23
+    },
+    "饰品": {
+      "code": "881162",
+      "name": "饰品",
+      "board_type": "HY",
+      "member_count": 15
+    },
+    "工程机械": {
+      "code": "881310",
+      "name": "工程机械",
+      "board_type": "HY",
+      "member_count": 32
+    },
+    "一般零售": {
+      "code": "881200",
+      "name": "一般零售",
+      "board_type": "HY",
+      "member_count": 41
+    },
+    "影视院线": {
+      "code": "881373",
+      "name": "影视院线",
+      "board_type": "HY",
+      "member_count": 20
+    },
+    "电池": {
+      "code": "881262",
+      "name": "电池",
+      "board_type": "HY",
+      "member_count": 99
+    },
+    "特钢": {
+      "code": "881069",
+      "name": "特钢",
+      "board_type": "HY",
+      "member_count": 11
+    },
+    "造纸": {
+      "code": "881167",
+      "name": "造纸",
+      "board_type": "HY",
+      "member_count": 29
+    },
+    "航天装备": {
+      "code": "881289",
+      "name": "航天装备",
+      "board_type": "HY",
+      "member_count": 10
+    },
+    "教育培训": {
+      "code": "881428",
+      "name": "教育培训",
+      "board_type": "HY",
+      "member_count": 18
+    },
+    "地面兵装": {
+      "code": "881287",
+      "name": "地面兵装",
+      "board_type": "HY",
+      "member_count": 14
+    },
+    "化纤": {
+      "code": "881019",
+      "name": "化纤",
+      "board_type": "HY",
+      "member_count": 31
+    },
+    "纺织制造": {
+      "code": "881151",
+      "name": "纺织制造",
+      "board_type": "HY",
+      "member_count": 35
+    },
+    "油服工程": {
+      "code": "881008",
+      "name": "油服工程",
+      "board_type": "HY",
+      "member_count": 14
+    },
+    "摩托车及其他": {
+      "code": "881227",
+      "name": "摩托车及其他",
+      "board_type": "HY",
+      "member_count": 16
+    },
+    "工程咨询服务": {
+      "code": "881415",
+      "name": "工程咨询服务",
+      "board_type": "HY",
+      "member_count": 43
+    },
+    "服装家纺": {
+      "code": "881157",
+      "name": "服装家纺",
+      "board_type": "HY",
+      "member_count": 57
+    },
+    "软件服务": {
+      "code": "881355",
+      "name": "软件服务",
+      "board_type": "HY",
+      "member_count": 233
+    },
+    "日用化工": {
+      "code": "881016",
+      "name": "日用化工",
+      "board_type": "HY",
+      "member_count": 19
+    },
+    "农产品加工": {
+      "code": "881123",
+      "name": "农产品加工",
+      "board_type": "HY",
+      "member_count": 20
+    },
+    "饲料": {
+      "code": "881119",
+      "name": "饲料",
+      "board_type": "HY",
+      "member_count": 21
+    },
+    "装饰建材": {
+      "code": "881097",
+      "name": "装饰建材",
+      "board_type": "HY",
+      "member_count": 43
+    },
+    "房地产开发": {
+      "code": "881418",
+      "name": "房地产开发",
+      "board_type": "HY",
+      "member_count": 84
+    },
+    "航海装备": {
+      "code": "881290",
+      "name": "航海装备",
+      "board_type": "HY",
+      "member_count": 11
+    },
+    "商业物业经营": {
+      "code": "881204",
+      "name": "商业物业经营",
+      "board_type": "HY",
+      "member_count": 17
+    },
+    "黑色家电": {
+      "code": "881187",
+      "name": "黑色家电",
+      "board_type": "HY",
+      "member_count": 10
+    },
+    "电力": {
+      "code": "881459",
+      "name": "电力",
+      "board_type": "HY",
+      "member_count": 102
+    },
+    "食品加工": {
+      "code": "881144",
+      "name": "食品加工",
+      "board_type": "HY",
+      "member_count": 38
+    },
+    "调味品": {
+      "code": "881139",
+      "name": "调味品",
+      "board_type": "HY",
+      "member_count": 18
+    },
+    "包装印刷": {
+      "code": "881171",
+      "name": "包装印刷",
+      "board_type": "HY",
+      "member_count": 49
+    },
+    "公路铁路": {
+      "code": "881442",
+      "name": "公路铁路",
+      "board_type": "HY",
+      "member_count": 32
+    },
+    "专业工程": {
+      "code": "881410",
+      "name": "专业工程",
+      "board_type": "HY",
+      "member_count": 43
+    },
+    "出版业": {
+      "code": "881380",
+      "name": "出版业",
+      "board_type": "HY",
+      "member_count": 29
+    },
+    "物流": {
+      "code": "881452",
+      "name": "物流",
+      "board_type": "HY",
+      "member_count": 47
+    },
+    "家居用品": {
+      "code": "881177",
+      "name": "家居用品",
+      "board_type": "HY",
+      "member_count": 73
+    },
+    "航空装备": {
+      "code": "881288",
+      "name": "航空装备",
+      "board_type": "HY",
+      "member_count": 44
+    },
+    "航运港口": {
+      "code": "881449",
+      "name": "航运港口",
+      "board_type": "HY",
+      "member_count": 35
+    },
+    "全国性银行": {
+      "code": "881386",
+      "name": "全国性银行",
+      "board_type": "HY",
+      "member_count": 15
+    },
+    "医疗器械": {
+      "code": "881241",
+      "name": "医疗器械",
+      "board_type": "HY",
+      "member_count": 104
+    },
+    "游戏": {
+      "code": "881369",
+      "name": "游戏",
+      "board_type": "HY",
+      "member_count": 25
+    },
+    "基础建设": {
+      "code": "881407",
+      "name": "基础建设",
+      "board_type": "HY",
+      "member_count": 40
+    },
+    "商用车": {
+      "code": "881215",
+      "name": "商用车",
+      "board_type": "HY",
+      "member_count": 13
+    },
+    "数字媒体": {
+      "code": "881376",
+      "name": "数字媒体",
+      "board_type": "HY",
+      "member_count": 10
+    },
+    "医药商业": {
+      "code": "881252",
+      "name": "医药商业",
+      "board_type": "HY",
+      "member_count": 37
+    },
+    "普钢": {
+      "code": "881065",
+      "name": "普钢",
+      "board_type": "HY",
+      "member_count": 24
+    },
+    "水务": {
+      "code": "881468",
+      "name": "水务",
+      "board_type": "HY",
+      "member_count": 15
+    },
+    "燃气": {
+      "code": "881467",
+      "name": "燃气",
+      "board_type": "HY",
+      "member_count": 31
+    },
+    "中药": {
+      "code": "881256",
+      "name": "中药",
+      "board_type": "HY",
+      "member_count": 68
+    },
+    "休闲食品": {
+      "code": "881140",
+      "name": "休闲食品",
+      "board_type": "HY",
+      "member_count": 20
+    },
+    "广告营销": {
+      "code": "881370",
+      "name": "广告营销",
+      "board_type": "HY",
+      "member_count": 31
+    },
+    "种植业": {
+      "code": "881106",
+      "name": "种植业",
+      "board_type": "HY",
+      "member_count": 20
+    },
+    "医疗服务": {
+      "code": "881247",
+      "name": "医疗服务",
+      "board_type": "HY",
+      "member_count": 55
+    },
+    "多元金融": {
+      "code": "881396",
+      "name": "多元金融",
+      "board_type": "HY",
+      "member_count": 25
+    },
+    "旅游": {
+      "code": "881432",
+      "name": "旅游",
+      "board_type": "HY",
+      "member_count": 26
+    },
+    "小家电": {
+      "code": "881190",
+      "name": "小家电",
+      "board_type": "HY",
+      "member_count": 26
+    },
+    "地方性银行": {
+      "code": "881389",
+      "name": "地方性银行",
+      "board_type": "HY",
+      "member_count": 27
+    },
+    "广播电视": {
+      "code": "881384",
+      "name": "广播电视",
+      "board_type": "HY",
+      "member_count": 13
+    },
+    "化学制药": {
+      "code": "881231",
+      "name": "化学制药",
+      "board_type": "HY",
+      "member_count": 134
+    },
+    "白色家电": {
+      "code": "881184",
+      "name": "白色家电",
+      "board_type": "HY",
+      "member_count": 10
+    },
+    "煤炭开采": {
+      "code": "881002",
+      "name": "煤炭开采",
+      "board_type": "HY",
+      "member_count": 25
+    },
+    "动物保健": {
+      "code": "881127",
+      "name": "动物保健",
+      "board_type": "HY",
+      "member_count": 14
+    },
+    "饮料乳品": {
+      "code": "881136",
+      "name": "饮料乳品",
+      "board_type": "HY",
+      "member_count": 30
+    },
+    "生物制品": {
+      "code": "881234",
+      "name": "生物制品",
+      "board_type": "HY",
+      "member_count": 103
+    },
+    "石油化工": {
+      "code": "881011",
+      "name": "石油化工",
+      "board_type": "HY",
+      "member_count": 18
+    },
+    "航空机场": {
+      "code": "881446",
+      "name": "航空机场",
+      "board_type": "HY",
+      "member_count": 13
+    },
+    "证券": {
+      "code": "881394",
+      "name": "证券",
+      "board_type": "HY",
+      "member_count": 50
+    },
+    "养殖业": {
+      "code": "881111",
+      "name": "养殖业",
+      "board_type": "HY",
+      "member_count": 21
+    },
+    "酿酒": {
+      "code": "881130",
+      "name": "酿酒",
+      "board_type": "HY",
+      "member_count": 37
+    },
+    "电信服务": {
+      "code": "881344",
+      "name": "电信服务",
+      "board_type": "HY",
+      "member_count": 14
+    },
+    "元宇宙概念": {
+      "code": "880748",
+      "name": "元宇宙概念",
+      "board_type": "GN",
+      "member_count": 177
+    },
+    "智能交通": {
+      "code": "880580",
+      "name": "智能交通",
+      "board_type": "GN",
+      "member_count": 213
+    },
+    "减速器": {
+      "code": "880675",
+      "name": "减速器",
+      "board_type": "GN",
+      "member_count": 135
+    },
+    "装配式建筑": {
+      "code": "880605",
+      "name": "装配式建筑",
+      "board_type": "GN",
+      "member_count": 109
+    },
+    "多模态AI": {
+      "code": "880693",
+      "name": "多模态AI",
+      "board_type": "GN",
+      "member_count": 145
+    },
+    "碳中和": {
+      "code": "880519",
+      "name": "碳中和",
+      "board_type": "GN",
+      "member_count": 265
+    },
+    "百度概念": {
+      "code": "880962",
+      "name": "百度概念",
+      "board_type": "GN",
+      "member_count": 227
+    },
+    "水利建设": {
+      "code": "880542",
+      "name": "水利建设",
+      "board_type": "GN",
+      "member_count": 251
+    },
+    "智慧城市": {
+      "code": "880949",
+      "name": "智慧城市",
+      "board_type": "GN",
+      "member_count": 380
+    },
+    "海峡西岸": {
+      "code": "880513",
+      "name": "海峡西岸",
+      "board_type": "GN",
+      "member_count": 165
+    },
+    "智能家居": {
+      "code": "880906",
+      "name": "智能家居",
+      "board_type": "GN",
+      "member_count": 282
+    },
+    "国产软件": {
+      "code": "880916",
+      "name": "国产软件",
+      "board_type": "GN",
+      "member_count": 264
+    },
+    "供销社": {
+      "code": "880642",
+      "name": "供销社",
+      "board_type": "GN",
+      "member_count": 19
+    },
+    "腾讯概念": {
+      "code": "880956",
+      "name": "腾讯概念",
+      "board_type": "GN",
+      "member_count": 297
+    },
+    "绿色电力": {
+      "code": "880753",
+      "name": "绿色电力",
+      "board_type": "GN",
+      "member_count": 405
+    },
+    "赛马概念": {
+      "code": "880923",
+      "name": "赛马概念",
+      "board_type": "GN",
+      "member_count": 18
+    },
+    "水产品": {
+      "code": "880903",
+      "name": "水产品",
+      "board_type": "GN",
+      "member_count": 12
+    },
+    "AI智能体": {
+      "code": "880732",
+      "name": "AI智能体",
+      "board_type": "GN",
+      "member_count": 430
+    },
+    "华为鸿蒙": {
+      "code": "880722",
+      "name": "华为鸿蒙",
+      "board_type": "GN",
+      "member_count": 262
+    },
+    "大数据": {
+      "code": "880954",
+      "name": "大数据",
+      "board_type": "GN",
+      "member_count": 274
+    },
+    "操作系统": {
+      "code": "880711",
+      "name": "操作系统",
+      "board_type": "GN",
+      "member_count": 56
+    },
+    "人脑工程": {
+      "code": "880733",
+      "name": "人脑工程",
+      "board_type": "GN",
+      "member_count": 89
+    },
+    "胎压监测": {
+      "code": "880968",
+      "name": "胎压监测",
+      "board_type": "GN",
+      "member_count": 29
+    },
+    "阿里概念": {
+      "code": "880921",
+      "name": "阿里概念",
+      "board_type": "GN",
+      "member_count": 346
+    },
+    "数字货币": {
+      "code": "880967",
+      "name": "数字货币",
+      "board_type": "GN",
+      "member_count": 100
+    },
+    "化肥概念": {
+      "code": "880618",
+      "name": "化肥概念",
+      "board_type": "GN",
+      "member_count": 67
+    },
+    "地热能": {
+      "code": "880575",
+      "name": "地热能",
+      "board_type": "GN",
+      "member_count": 20
+    },
+    "雄安新区": {
+      "code": "880911",
+      "name": "雄安新区",
+      "board_type": "GN",
+      "member_count": 231
+    },
+    "职业教育": {
+      "code": "880908",
+      "name": "职业教育",
+      "board_type": "GN",
+      "member_count": 124
+    },
+    "地下管网": {
+      "code": "880724",
+      "name": "地下管网",
+      "board_type": "GN",
+      "member_count": 99
+    },
+    "智慧政务": {
+      "code": "880601",
+      "name": "智慧政务",
+      "board_type": "GN",
+      "member_count": 217
+    },
+    "代糖概念": {
+      "code": "880741",
+      "name": "代糖概念",
+      "board_type": "GN",
+      "member_count": 24
+    },
+    "智谱AI": {
+      "code": "880579",
+      "name": "智谱AI",
+      "board_type": "GN",
+      "member_count": 70
+    },
+    "外骨骼机器人": {
+      "code": "880912",
+      "name": "外骨骼机器人",
+      "board_type": "GN",
+      "member_count": 28
+    },
+    "物业管理概念": {
+      "code": "880743",
+      "name": "物业管理概念",
+      "board_type": "GN",
+      "member_count": 186
+    },
+    "PPP概念": {
+      "code": "880940",
+      "name": "PPP概念",
+      "board_type": "GN",
+      "member_count": 174
+    },
+    "区块链": {
+      "code": "880946",
+      "name": "区块链",
+      "board_type": "GN",
+      "member_count": 275
+    },
+    "新型城镇": {
+      "code": "880624",
+      "name": "新型城镇",
+      "board_type": "GN",
+      "member_count": 211
+    },
+    "可燃冰": {
+      "code": "880549",
+      "name": "可燃冰",
+      "board_type": "GN",
+      "member_count": 25
+    },
+    "超临界发电": {
+      "code": "880627",
+      "name": "超临界发电",
+      "board_type": "GN",
+      "member_count": 87
+    },
+    "远程办公": {
+      "code": "880794",
+      "name": "远程办公",
+      "board_type": "GN",
+      "member_count": 37
+    },
+    "医废处理": {
+      "code": "880796",
+      "name": "医废处理",
+      "board_type": "GN",
+      "member_count": 42
+    },
+    "数据要素": {
+      "code": "880667",
+      "name": "数据要素",
+      "board_type": "GN",
+      "member_count": 391
+    },
+    "通达信88": {
+      "code": "880515",
+      "name": "通达信88",
+      "board_type": "GN",
+      "member_count": 88
+    },
+    "冷链物流": {
+      "code": "880757",
+      "name": "冷链物流",
+      "board_type": "GN",
+      "member_count": 146
+    },
+    "Web3概念": {
+      "code": "880643",
+      "name": "Web3概念",
+      "board_type": "GN",
+      "member_count": 66
+    },
+    "跨境电商": {
+      "code": "880941",
+      "name": "跨境电商",
+      "board_type": "GN",
+      "member_count": 327
+    },
+    "财税数字化": {
+      "code": "880555",
+      "name": "财税数字化",
+      "board_type": "GN",
+      "member_count": 67
+    },
+    "智能医疗": {
+      "code": "880933",
+      "name": "智能医疗",
+      "board_type": "GN",
+      "member_count": 207
+    },
+    "粮食概念": {
+      "code": "880626",
+      "name": "粮食概念",
+      "board_type": "GN",
+      "member_count": 47
+    },
+    "生物质能": {
+      "code": "880568",
+      "name": "生物质能",
+      "board_type": "GN",
+      "member_count": 63
+    },
+    "互联金融": {
+      "code": "880592",
+      "name": "互联金融",
+      "board_type": "GN",
+      "member_count": 212
+    },
+    "地摊经济": {
+      "code": "880719",
+      "name": "地摊经济",
+      "board_type": "GN",
+      "member_count": 26
+    },
+    "NMN概念": {
+      "code": "880745",
+      "name": "NMN概念",
+      "board_type": "GN",
+      "member_count": 28
+    },
+    "体育概念": {
+      "code": "880596",
+      "name": "体育概念",
+      "board_type": "GN",
+      "member_count": 127
+    },
+    "DRG-DIP": {
+      "code": "880644",
+      "name": "DRG-DIP",
+      "board_type": "GN",
+      "member_count": 21
+    },
+    "幽门螺杆菌": {
+      "code": "880766",
+      "name": "幽门螺杆菌",
+      "board_type": "GN",
+      "member_count": 74
+    },
+    "上海自贸": {
+      "code": "880591",
+      "name": "上海自贸",
+      "board_type": "GN",
+      "member_count": 84
+    },
+    "海南自贸": {
+      "code": "880567",
+      "name": "海南自贸",
+      "board_type": "GN",
+      "member_count": 47
+    },
+    "人造肉": {
+      "code": "880709",
+      "name": "人造肉",
+      "board_type": "GN",
+      "member_count": 21
+    },
+    "种业": {
+      "code": "880710",
+      "name": "种业",
+      "board_type": "GN",
+      "member_count": 13
+    },
+    "网络游戏": {
+      "code": "880590",
+      "name": "网络游戏",
+      "board_type": "GN",
+      "member_count": 103
+    },
+    "小红书概念": {
+      "code": "880718",
+      "name": "小红书概念",
+      "board_type": "GN",
+      "member_count": 76
+    },
+    "AIGC概念": {
+      "code": "880645",
+      "name": "AIGC概念",
+      "board_type": "GN",
+      "member_count": 286
+    },
+    "乡村振兴": {
+      "code": "880955",
+      "name": "乡村振兴",
+      "board_type": "GN",
+      "member_count": 393
+    },
+    "跨境支付CIPS": {
+      "code": "880609",
+      "name": "跨境支付CIPS",
+      "board_type": "GN",
+      "member_count": 75
+    },
+    "ChatGPT概念": {
+      "code": "880654",
+      "name": "ChatGPT概念",
+      "board_type": "GN",
+      "member_count": 138
+    },
+    "雅江水电概念": {
+      "code": "880972",
+      "name": "雅江水电概念",
+      "board_type": "GN",
+      "member_count": 101
+    },
+    "风沙治理": {
+      "code": "880585",
+      "name": "风沙治理",
+      "board_type": "GN",
+      "member_count": 11
+    },
+    "ST板块": {
+      "code": "880516",
+      "name": "ST板块",
+      "board_type": "GN",
+      "member_count": 259
+    },
+    "天然气": {
+      "code": "880750",
+      "name": "天然气",
+      "board_type": "GN",
+      "member_count": 144
+    },
+    "短剧游戏": {
+      "code": "880692",
+      "name": "短剧游戏",
+      "board_type": "GN",
+      "member_count": 86
+    },
+    "民营医院": {
+      "code": "880599",
+      "name": "民营医院",
+      "board_type": "GN",
+      "member_count": 77
+    },
+    "家庭医生": {
+      "code": "880615",
+      "name": "家庭医生",
+      "board_type": "GN",
+      "member_count": 24
+    },
+    "AI医疗概念": {
+      "code": "880747",
+      "name": "AI医疗概念",
+      "board_type": "GN",
+      "member_count": 106
+    },
+    "土地流转": {
+      "code": "880586",
+      "name": "土地流转",
+      "board_type": "GN",
+      "member_count": 35
+    },
+    "婴童概念": {
+      "code": "880593",
+      "name": "婴童概念",
+      "board_type": "GN",
+      "member_count": 211
+    },
+    "养老概念": {
+      "code": "880597",
+      "name": "养老概念",
+      "board_type": "GN",
+      "member_count": 214
+    },
+    "工业大麻": {
+      "code": "880704",
+      "name": "工业大麻",
+      "board_type": "GN",
+      "member_count": 53
+    },
+    "时空大数据": {
+      "code": "880662",
+      "name": "时空大数据",
+      "board_type": "GN",
+      "member_count": 47
+    },
+    "新零售": {
+      "code": "880572",
+      "name": "新零售",
+      "board_type": "GN",
+      "member_count": 331
+    },
+    "云游戏": {
+      "code": "880749",
+      "name": "云游戏",
+      "board_type": "GN",
+      "member_count": 27
+    },
+    "旅游概念": {
+      "code": "880651",
+      "name": "旅游概念",
+      "board_type": "GN",
+      "member_count": 150
+    },
+    "NFT概念": {
+      "code": "880621",
+      "name": "NFT概念",
+      "board_type": "GN",
+      "member_count": 72
+    },
+    "数据确权": {
+      "code": "880647",
+      "name": "数据确权",
+      "board_type": "GN",
+      "member_count": 67
+    },
+    "IP经济": {
+      "code": "880617",
+      "name": "IP经济",
+      "board_type": "GN",
+      "member_count": 192
+    },
+    "网红经济": {
+      "code": "880791",
+      "name": "网红经济",
+      "board_type": "GN",
+      "member_count": 119
+    },
+    "基因概念": {
+      "code": "880913",
+      "name": "基因概念",
+      "board_type": "GN",
+      "member_count": 112
+    },
+    "辅助生殖": {
+      "code": "880606",
+      "name": "辅助生殖",
+      "board_type": "GN",
+      "member_count": 75
+    },
+    "宠物经济": {
+      "code": "880707",
+      "name": "宠物经济",
+      "board_type": "GN",
+      "member_count": 127
+    },
+    "维生素": {
+      "code": "880929",
+      "name": "维生素",
+      "board_type": "GN",
+      "member_count": 76
+    },
+    "医美概念": {
+      "code": "880973",
+      "name": "医美概念",
+      "board_type": "GN",
+      "member_count": 103
+    },
+    "国资云": {
+      "code": "880746",
+      "name": "国资云",
+      "board_type": "GN",
+      "member_count": 51
+    },
+    "博彩概念": {
+      "code": "880598",
+      "name": "博彩概念",
+      "board_type": "GN",
+      "member_count": 19
+    },
+    "知识产权": {
+      "code": "880959",
+      "name": "知识产权",
+      "board_type": "GN",
+      "member_count": 51
+    },
+    "航运概念": {
+      "code": "880728",
+      "name": "航运概念",
+      "board_type": "GN",
+      "member_count": 87
+    },
+    "页岩气": {
+      "code": "880553",
+      "name": "页岩气",
+      "board_type": "GN",
+      "member_count": 46
+    },
+    "合成生物": {
+      "code": "880530",
+      "name": "合成生物",
+      "board_type": "GN",
+      "member_count": 164
+    },
+    "预制菜": {
+      "code": "880760",
+      "name": "预制菜",
+      "board_type": "GN",
+      "member_count": 110
+    },
+    "知识付费": {
+      "code": "880668",
+      "name": "知识付费",
+      "board_type": "GN",
+      "member_count": 22
+    },
+    "AI营销": {
+      "code": "880958",
+      "name": "AI营销",
+      "board_type": "GN",
+      "member_count": 43
+    },
+    "免税概念": {
+      "code": "880602",
+      "name": "免税概念",
+      "board_type": "GN",
+      "member_count": 49
+    },
+    "军贸概念": {
+      "code": "880914",
+      "name": "军贸概念",
+      "board_type": "GN",
+      "member_count": 26
+    },
+    "含H股": {
+      "code": "880501",
+      "name": "含H股",
+      "board_type": "GN",
+      "member_count": 189
+    },
+    "租购同权": {
+      "code": "880953",
+      "name": "租购同权",
+      "board_type": "GN",
+      "member_count": 27
+    },
+    "CXO概念": {
+      "code": "880729",
+      "name": "CXO概念",
+      "board_type": "GN",
+      "member_count": 77
+    },
+    "肝炎概念": {
+      "code": "880623",
+      "name": "肝炎概念",
+      "board_type": "GN",
+      "member_count": 137
+    },
+    "免疫治疗": {
+      "code": "880920",
+      "name": "免疫治疗",
+      "board_type": "GN",
+      "member_count": 63
+    },
+    "中特估": {
+      "code": "880671",
+      "name": "中特估",
+      "board_type": "GN",
+      "member_count": 98
+    },
+    "减肥药": {
+      "code": "880681",
+      "name": "减肥药",
+      "board_type": "GN",
+      "member_count": 62
+    },
+    "创新药": {
+      "code": "880652",
+      "name": "创新药",
+      "board_type": "GN",
+      "member_count": 274
+    },
+    "仿制药": {
+      "code": "880960",
+      "name": "仿制药",
+      "board_type": "GN",
+      "member_count": 73
+    },
+    "猪肉": {
+      "code": "880936",
+      "name": "猪肉",
+      "board_type": "GN",
+      "member_count": 33
+    },
+    "鸡肉": {
+      "code": "880764",
+      "name": "鸡肉",
+      "board_type": "GN",
+      "member_count": 22
+    },
+    "生物疫苗": {
+      "code": "880557",
+      "name": "生物疫苗",
+      "board_type": "GN",
+      "member_count": 70
+    },
+    "白酒概念": {
+      "code": "880564",
+      "name": "白酒概念",
+      "board_type": "GN",
+      "member_count": 51
+    },
+    "培育钻石": {
+      "code": "880754",
+      "name": "培育钻石",
+      "board_type": "GN",
+      "member_count": 18
+    },
+    "PCB概念": {
+      "code": "880550",
+      "name": "PCB概念",
+      "board_type": "GN",
+      "member_count": 204
+    },
+    "CPO概念": {
+      "code": "880656",
+      "name": "CPO概念",
+      "board_type": "GN",
+      "member_count": 184
+    },
+    "复合铜箔": {
+      "code": "880646",
+      "name": "复合铜箔",
+      "board_type": "GN",
+      "member_count": 47
+    },
+    "超级电容": {
+      "code": "880798",
+      "name": "超级电容",
+      "board_type": "GN",
+      "member_count": 39
+    },
+    "苹果概念": {
+      "code": "880574",
+      "name": "苹果概念",
+      "board_type": "GN",
+      "member_count": 146
+    },
+    "玻璃基板": {
+      "code": "880547",
+      "name": "玻璃基板",
+      "board_type": "GN",
+      "member_count": 23
+    },
+    "铜缆高速连接": {
+      "code": "880523",
+      "name": "铜缆高速连接",
+      "board_type": "GN",
+      "member_count": 48
+    },
+    "MiniLED": {
+      "code": "880725",
+      "name": "MiniLED",
+      "board_type": "GN",
+      "member_count": 102
+    },
+    "英伟达概念": {
+      "code": "880674",
+      "name": "英伟达概念",
+      "board_type": "GN",
+      "member_count": 90
+    },
+    "光通信": {
+      "code": "880670",
+      "name": "光通信",
+      "board_type": "GN",
+      "member_count": 140
+    },
+    "第三代半导体": {
+      "code": "880608",
+      "name": "第三代半导体",
+      "board_type": "GN",
+      "member_count": 173
+    },
+    "BC电池": {
+      "code": "880684",
+      "name": "BC电池",
+      "board_type": "GN",
+      "member_count": 50
+    },
+    "先进封装": {
+      "code": "880635",
+      "name": "先进封装",
+      "board_type": "GN",
+      "member_count": 169
+    },
+    "AI手机PC": {
+      "code": "880541",
+      "name": "AI手机PC",
+      "board_type": "GN",
+      "member_count": 66
+    },
+    "消费电子概念": {
+      "code": "880966",
+      "name": "消费电子概念",
+      "board_type": "GN",
+      "member_count": 489
+    },
+    "OLED概念": {
+      "code": "880945",
+      "name": "OLED概念",
+      "board_type": "GN",
+      "member_count": 151
+    },
+    "5G概念": {
+      "code": "880506",
+      "name": "5G概念",
+      "board_type": "GN",
+      "member_count": 450
+    },
+    "AI眼镜": {
+      "code": "880566",
+      "name": "AI眼镜",
+      "board_type": "GN",
+      "member_count": 186
+    },
+    "光刻机": {
+      "code": "880716",
+      "name": "光刻机",
+      "board_type": "GN",
+      "member_count": 121
+    },
+    "折叠屏": {
+      "code": "880561",
+      "name": "折叠屏",
+      "board_type": "GN",
+      "member_count": 115
+    },
+    "MicroLED": {
+      "code": "880629",
+      "name": "MicroLED",
+      "board_type": "GN",
+      "member_count": 75
+    },
+    "新材料": {
+      "code": "880731",
+      "name": "新材料",
+      "board_type": "GN",
+      "member_count": 396
+    },
+    "镍金属": {
+      "code": "880612",
+      "name": "镍金属",
+      "board_type": "GN",
+      "member_count": 45
+    },
+    "稀缺资源": {
+      "code": "880505",
+      "name": "稀缺资源",
+      "board_type": "GN",
+      "member_count": 64
+    },
+    "稀土永磁": {
+      "code": "880535",
+      "name": "稀土永磁",
+      "board_type": "GN",
+      "member_count": 83
+    },
+    "毫米波雷达": {
+      "code": "880659",
+      "name": "毫米波雷达",
+      "board_type": "GN",
+      "member_count": 125
+    },
+    "存储芯片": {
+      "code": "880672",
+      "name": "存储芯片",
+      "board_type": "GN",
+      "member_count": 189
+    },
+    "高压快充": {
+      "code": "880658",
+      "name": "高压快充",
+      "board_type": "GN",
+      "member_count": 113
+    },
+    "液冷服务器": {
+      "code": "880685",
+      "name": "液冷服务器",
+      "board_type": "GN",
+      "member_count": 206
+    },
+    "氟概念": {
+      "code": "880714",
+      "name": "氟概念",
+      "board_type": "GN",
+      "member_count": 64
+    },
+    "汽车电子": {
+      "code": "880930",
+      "name": "汽车电子",
+      "board_type": "GN",
+      "member_count": 399
+    },
+    "钴金属": {
+      "code": "880899",
+      "name": "钴金属",
+      "board_type": "GN",
+      "member_count": 37
+    },
+    "华为海思": {
+      "code": "880682",
+      "name": "华为海思",
+      "board_type": "GN",
+      "member_count": 62
+    },
+    "混合现实": {
+      "code": "880673",
+      "name": "混合现实",
+      "board_type": "GN",
+      "member_count": 62
+    },
+    "新型烟草": {
+      "code": "880740",
+      "name": "新型烟草",
+      "board_type": "GN",
+      "member_count": 56
+    },
+    "6G概念": {
+      "code": "880661",
+      "name": "6G概念",
+      "board_type": "GN",
+      "member_count": 96
+    },
+    "次新股": {
+      "code": "880529",
+      "name": "次新股",
+      "board_type": "GN",
+      "member_count": 130
+    },
+    "固态电池": {
+      "code": "880742",
+      "name": "固态电池",
+      "board_type": "GN",
+      "member_count": 290
+    },
+    "PVDF概念": {
+      "code": "880604",
+      "name": "PVDF概念",
+      "board_type": "GN",
+      "member_count": 16
+    },
+    "汽车芯片": {
+      "code": "880758",
+      "name": "汽车芯片",
+      "board_type": "GN",
+      "member_count": 121
+    },
+    "黄金概念": {
+      "code": "880521",
+      "name": "黄金概念",
+      "board_type": "GN",
+      "member_count": 82
+    },
+    "石墨烯": {
+      "code": "880584",
+      "name": "石墨烯",
+      "board_type": "GN",
+      "member_count": 96
+    },
+    "MCU芯片": {
+      "code": "880726",
+      "name": "MCU芯片",
+      "board_type": "GN",
+      "member_count": 90
+    },
+    "锂电池概念": {
+      "code": "880534",
+      "name": "锂电池概念",
+      "board_type": "GN",
+      "member_count": 596
+    },
+    "EDA概念": {
+      "code": "880637",
+      "name": "EDA概念",
+      "board_type": "GN",
+      "member_count": 17
+    },
+    "小米概念": {
+      "code": "880961",
+      "name": "小米概念",
+      "board_type": "GN",
+      "member_count": 337
+    },
+    "电子纸": {
+      "code": "880767",
+      "name": "电子纸",
+      "board_type": "GN",
+      "member_count": 22
+    },
+    "TOPCon电池": {
+      "code": "880638",
+      "name": "TOPCon电池",
+      "board_type": "GN",
+      "member_count": 66
+    },
+    "有机硅概念": {
+      "code": "880975",
+      "name": "有机硅概念",
+      "board_type": "GN",
+      "member_count": 50
+    },
+    "特高压": {
+      "code": "880964",
+      "name": "特高压",
+      "board_type": "GN",
+      "member_count": 126
+    },
+    "钛金属": {
+      "code": "880922",
+      "name": "钛金属",
+      "board_type": "GN",
+      "member_count": 24
+    },
+    "机器视觉": {
+      "code": "880664",
+      "name": "机器视觉",
+      "board_type": "GN",
+      "member_count": 246
+    },
+    "工业软件": {
+      "code": "880660",
+      "name": "工业软件",
+      "board_type": "GN",
+      "member_count": 35
+    },
+    "钙钛矿电池": {
+      "code": "880655",
+      "name": "钙钛矿电池",
+      "board_type": "GN",
+      "member_count": 94
+    },
+    "3D打印": {
+      "code": "880569",
+      "name": "3D打印",
+      "board_type": "GN",
+      "member_count": 134
+    },
+    "智能穿戴": {
+      "code": "880589",
+      "name": "智能穿戴",
+      "board_type": "GN",
+      "member_count": 250
+    },
+    "分散染料": {
+      "code": "880706",
+      "name": "分散染料",
+      "board_type": "GN",
+      "member_count": 20
+    },
+    "超导概念": {
+      "code": "880905",
+      "name": "超导概念",
+      "board_type": "GN",
+      "member_count": 35
+    },
+    "HJT电池": {
+      "code": "880737",
+      "name": "HJT电池",
+      "board_type": "GN",
+      "member_count": 59
+    },
+    "无线耳机": {
+      "code": "880969",
+      "name": "无线耳机",
+      "board_type": "GN",
+      "member_count": 93
+    },
+    "特斯拉概念": {
+      "code": "880902",
+      "name": "特斯拉概念",
+      "board_type": "GN",
+      "member_count": 267
+    },
+    "商业航天": {
+      "code": "880548",
+      "name": "商业航天",
+      "board_type": "GN",
+      "member_count": 512
+    },
+    "量子科技": {
+      "code": "880943",
+      "name": "量子科技",
+      "board_type": "GN",
+      "member_count": 111
+    },
+    "碳纤维": {
+      "code": "880571",
+      "name": "碳纤维",
+      "board_type": "GN",
+      "member_count": 76
+    },
+    "钠电池": {
+      "code": "880755",
+      "name": "钠电池",
+      "board_type": "GN",
+      "member_count": 139
+    },
+    "聚氨酯": {
+      "code": "880587",
+      "name": "聚氨酯",
+      "board_type": "GN",
+      "member_count": 37
+    },
+    "东数西算": {
+      "code": "880607",
+      "name": "东数西算",
+      "board_type": "GN",
+      "member_count": 392
+    },
+    "智能电网": {
+      "code": "880520",
+      "name": "智能电网",
+      "board_type": "GN",
+      "member_count": 275
+    },
+    "超清视频": {
+      "code": "880965",
+      "name": "超清视频",
+      "board_type": "GN",
+      "member_count": 94
+    },
+    "POE胶膜": {
+      "code": "880649",
+      "name": "POE胶膜",
+      "board_type": "GN",
+      "member_count": 29
+    },
+    "燃料电池": {
+      "code": "880909",
+      "name": "燃料电池",
+      "board_type": "GN",
+      "member_count": 214
+    },
+    "国防军工": {
+      "code": "880507",
+      "name": "国防军工",
+      "board_type": "GN",
+      "member_count": 531
+    },
+    "卫星导航": {
+      "code": "880546",
+      "name": "卫星导航",
+      "board_type": "GN",
+      "member_count": 279
+    },
+    "工业母机": {
+      "code": "880736",
+      "name": "工业母机",
+      "board_type": "GN",
+      "member_count": 115
+    },
+    "含GDR": {
+      "code": "880634",
+      "name": "含GDR",
+      "board_type": "GN",
+      "member_count": 23
+    },
+    "虚拟现实": {
+      "code": "880942",
+      "name": "虚拟现实",
+      "board_type": "GN",
+      "member_count": 271
+    },
+    "边缘计算": {
+      "code": "880739",
+      "name": "边缘计算",
+      "board_type": "GN",
+      "member_count": 155
+    },
+    "动力电池回收": {
+      "code": "880632",
+      "name": "动力电池回收",
+      "board_type": "GN",
+      "member_count": 92
+    },
+    "无人机": {
+      "code": "880939",
+      "name": "无人机",
+      "board_type": "GN",
+      "member_count": 456
+    },
+    "高端装备": {
+      "code": "880560",
+      "name": "高端装备",
+      "board_type": "GN",
+      "member_count": 367
+    },
+    "人形机器人": {
+      "code": "880703",
+      "name": "人形机器人",
+      "board_type": "GN",
+      "member_count": 445
+    },
+    "充电桩": {
+      "code": "880583",
+      "name": "充电桩",
+      "board_type": "GN",
+      "member_count": 383
+    },
+    "新型工业化": {
+      "code": "880688",
+      "name": "新型工业化",
+      "board_type": "GN",
+      "member_count": 286
+    },
+    "血氧仪": {
+      "code": "880650",
+      "name": "血氧仪",
+      "board_type": "GN",
+      "member_count": 31
+    },
+    "磷概念": {
+      "code": "880715",
+      "name": "磷概念",
+      "board_type": "GN",
+      "member_count": 57
+    },
+    "可控核聚变": {
+      "code": "880666",
+      "name": "可控核聚变",
+      "board_type": "GN",
+      "member_count": 112
+    },
+    "核污染防治": {
+      "code": "880611",
+      "name": "核污染防治",
+      "board_type": "GN",
+      "member_count": 63
+    },
+    "汽车热管理": {
+      "code": "880633",
+      "name": "汽车热管理",
+      "board_type": "GN",
+      "member_count": 138
+    },
+    "华为算力": {
+      "code": "880689",
+      "name": "华为算力",
+      "board_type": "GN",
+      "member_count": 118
+    },
+    "无人驾驶": {
+      "code": "880944",
+      "name": "无人驾驶",
+      "board_type": "GN",
+      "member_count": 397
+    },
+    "光热发电": {
+      "code": "880639",
+      "name": "光热发电",
+      "board_type": "GN",
+      "member_count": 41
+    },
+    "降解塑料": {
+      "code": "880971",
+      "name": "降解塑料",
+      "board_type": "GN",
+      "member_count": 83
+    },
+    "华为汽车": {
+      "code": "880686",
+      "name": "华为汽车",
+      "board_type": "GN",
+      "member_count": 176
+    },
+    "热泵概念": {
+      "code": "880636",
+      "name": "热泵概念",
+      "board_type": "GN",
+      "member_count": 49
+    },
+    "虚拟电厂": {
+      "code": "880630",
+      "name": "虚拟电厂",
+      "board_type": "GN",
+      "member_count": 153
+    },
+    "物联网": {
+      "code": "880533",
+      "name": "物联网",
+      "board_type": "GN",
+      "member_count": 506
+    },
+    "绿色建筑": {
+      "code": "880614",
+      "name": "绿色建筑",
+      "board_type": "GN",
+      "member_count": 73
+    },
+    "安防服务": {
+      "code": "880577",
+      "name": "安防服务",
+      "board_type": "GN",
+      "member_count": 137
+    },
+    "粤港澳": {
+      "code": "880919",
+      "name": "粤港澳",
+      "board_type": "GN",
+      "member_count": 356
+    },
+    "虫害防治": {
+      "code": "880797",
+      "name": "虫害防治",
+      "board_type": "GN",
+      "member_count": 34
+    },
+    "钒电池": {
+      "code": "880628",
+      "name": "钒电池",
+      "board_type": "GN",
+      "member_count": 30
+    },
+    "算力租赁": {
+      "code": "880669",
+      "name": "算力租赁",
+      "board_type": "GN",
+      "member_count": 200
+    },
+    "军民融合": {
+      "code": "880950",
+      "name": "军民融合",
+      "board_type": "GN",
+      "member_count": 195
+    },
+    "小米汽车概念": {
+      "code": "880696",
+      "name": "小米汽车概念",
+      "board_type": "GN",
+      "member_count": 131
+    },
+    "节能环保": {
+      "code": "880558",
+      "name": "节能环保",
+      "board_type": "GN",
+      "member_count": 344
+    },
+    "含B股": {
+      "code": "880502",
+      "name": "含B股",
+      "board_type": "GN",
+      "member_count": 72
+    },
+    "核电核能": {
+      "code": "880537",
+      "name": "核电核能",
+      "board_type": "GN",
+      "member_count": 338
+    },
+    "风电": {
+      "code": "880582",
+      "name": "风电",
+      "board_type": "GN",
+      "member_count": 430
+    },
+    "PEEK材料": {
+      "code": "880695",
+      "name": "PEEK材料",
+      "board_type": "GN",
+      "member_count": 51
+    },
+    "口罩防护": {
+      "code": "880795",
+      "name": "口罩防护",
+      "board_type": "GN",
+      "member_count": 195
+    },
+    "军工信息化": {
+      "code": "880528",
+      "name": "军工信息化",
+      "board_type": "GN",
+      "member_count": 114
+    },
+    "大飞机": {
+      "code": "880616",
+      "name": "大飞机",
+      "board_type": "GN",
+      "member_count": 153
+    },
+    "含可转债": {
+      "code": "880524",
+      "name": "含可转债",
+      "board_type": "GN",
+      "member_count": 331
+    },
+    "低空经济": {
+      "code": "880522",
+      "name": "低空经济",
+      "board_type": "GN",
+      "member_count": 487
+    },
+    "高铁": {
+      "code": "880525",
+      "name": "高铁",
+      "board_type": "GN",
+      "member_count": 135
+    },
+    "换电概念": {
+      "code": "880759",
+      "name": "换电概念",
+      "board_type": "GN",
+      "member_count": 93
+    },
+    "氢能源": {
+      "code": "880705",
+      "name": "氢能源",
+      "board_type": "GN",
+      "member_count": 408
+    },
+    "信息安全": {
+      "code": "880901",
+      "name": "信息安全",
+      "board_type": "GN",
+      "member_count": 216
+    },
+    "星闪概念": {
+      "code": "880683",
+      "name": "星闪概念",
+      "board_type": "GN",
+      "member_count": 70
+    },
+    "电子身份证": {
+      "code": "880613",
+      "name": "电子身份证",
+      "board_type": "GN",
+      "member_count": 43
+    },
+    "ETC概念": {
+      "code": "880713",
+      "name": "ETC概念",
+      "board_type": "GN",
+      "member_count": 44
+    },
+    "盐湖提锂": {
+      "code": "880727",
+      "name": "盐湖提锂",
+      "board_type": "GN",
+      "member_count": 45
+    },
+    "工业互联": {
+      "code": "880957",
+      "name": "工业互联",
+      "board_type": "GN",
+      "member_count": 366
+    },
+    "云计算": {
+      "code": "880545",
+      "name": "云计算",
+      "board_type": "GN",
+      "member_count": 203
+    },
+    "海洋经济": {
+      "code": "880765",
+      "name": "海洋经济",
+      "board_type": "GN",
+      "member_count": 62
+    },
+    "汽车拆解": {
+      "code": "880744",
+      "name": "汽车拆解",
+      "board_type": "GN",
+      "member_count": 26
+    },
+    "飞行汽车": {
+      "code": "880697",
+      "name": "飞行汽车",
+      "board_type": "GN",
+      "member_count": 133
+    },
+    "锂矿": {
+      "code": "880761",
+      "name": "锂矿",
+      "board_type": "GN",
+      "member_count": 51
+    },
+    "C2M概念": {
+      "code": "880717",
+      "name": "C2M概念",
+      "board_type": "GN",
+      "member_count": 37
+    },
+    "车联网": {
+      "code": "880552",
+      "name": "车联网",
+      "board_type": "GN",
+      "member_count": 294
+    },
+    "一体压铸": {
+      "code": "880631",
+      "name": "一体压铸",
+      "board_type": "GN",
+      "member_count": 57
+    },
+    "信创": {
+      "code": "880762",
+      "name": "信创",
+      "board_type": "GN",
+      "member_count": 288
+    },
+    "草甘膦": {
+      "code": "880910",
+      "name": "草甘膦",
+      "board_type": "GN",
+      "member_count": 17
+    },
+    "BIPV概念": {
+      "code": "880977",
+      "name": "BIPV概念",
+      "board_type": "GN",
+      "member_count": 133
+    },
+    "食品安全": {
+      "code": "880563",
+      "name": "食品安全",
+      "board_type": "GN",
+      "member_count": 65
+    },
+    "数字水印": {
+      "code": "880657",
+      "name": "数字水印",
+      "board_type": "GN",
+      "member_count": 31
+    },
+    "垃圾分类": {
+      "code": "880926",
+      "name": "垃圾分类",
+      "board_type": "GN",
+      "member_count": 101
+    },
+    "烟草概念": {
+      "code": "880974",
+      "name": "烟草概念",
+      "board_type": "GN",
+      "member_count": 32
+    },
+    "抖音概念": {
+      "code": "880720",
+      "name": "抖音概念",
+      "board_type": "GN",
+      "member_count": 243
+    },
+    "工业气体": {
+      "code": "880734",
+      "name": "工业气体",
+      "board_type": "GN",
+      "member_count": 29
+    },
+    "中俄贸易": {
+      "code": "880610",
+      "name": "中俄贸易",
+      "board_type": "GN",
+      "member_count": 181
+    },
+    "创投概念": {
+      "code": "880540",
+      "name": "创投概念",
+      "board_type": "GN",
+      "member_count": 453
+    },
+    "数字孪生": {
+      "code": "880738",
+      "name": "数字孪生",
+      "board_type": "GN",
+      "member_count": 203
+    }
+  },
+  "split_meta": {
+    "train_end": "2025-06-10",
+    "valid_end": "2025-11-26",
+    "test_start": "2025-11-27",
+    "n_dates": 574
+  },
+  "test_eval": {
+    "confusion_matrix": [
+      [
+        669,
+        42,
+        21,
+        262
+      ],
+      [
+        11,
+        569,
+        745,
+        16
+      ],
+      [
+        2,
+        54,
+        556,
+        5
+      ],
+      [
+        6153,
+        1436,
+        989,
+        30989
+      ]
+    ],
+    "labels": [
+      "预备炒作",
+      "正在炒作",
+      "炒作末期",
+      "冷门板块"
+    ],
+    "per_class": {
+      "预备炒作": {
+        "precision": 0.09787856620336503,
+        "recall": 0.6730382293762576,
+        "f1": 0.17090305275258655,
+        "support": 994
+      },
+      "正在炒作": {
+        "precision": 0.27082341742027605,
+        "recall": 0.424310216256525,
+        "f1": 0.3306217315514236,
+        "support": 1341
+      },
+      "炒作末期": {
+        "precision": 0.2405884898312419,
+        "recall": 0.9011345218800648,
+        "f1": 0.37978142076502736,
+        "support": 617
+      },
+      "冷门板块": {
+        "precision": 0.9909503709388591,
+        "recall": 0.7832031743624738,
+        "f1": 0.8749135363288584,
+        "support": 39567
+      }
+    },
+    "accuracy": 0.7710200145817164,
+    "macro_f1": 0.43905493534947393,
+    "balanced_accuracy": 0.6954215354688302,
+    "n_samples": 42519
+  },
+  "model_used": "lightgbm",
+  "latest_date": "2026-05-22",
+  "paths": {
+    "test_predictions": "D:\\pythonProject\\数据源\\src\\板块炒作阶段预测\\results_web\\test_predictions.csv",
+    "full_predictions": "D:\\pythonProject\\数据源\\src\\板块炒作阶段预测\\results_web\\full_predictions.csv",
+    "latest_predictions": "D:\\pythonProject\\数据源\\src\\板块炒作阶段预测\\results_web\\latest_predictions_2026-05-22.csv",
+    "feature_importance": "D:\\pythonProject\\数据源\\src\\板块炒作阶段预测\\results_web\\feature_importance.csv",
+    "model_info": "D:\\pythonProject\\数据源\\src\\板块炒作阶段预测\\results_web\\model_info.json"
+  }
+}
