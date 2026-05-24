@@ -1,0 +1,38 @@
+{
+  "opentdx_path": "d:\\pythonProject\\数据源\\md\\通达信\\opentdx-main",
+  "start_time": "2024-11-01",
+  "end_time": "2026-04-30",
+  "markets": [
+    "SZ",
+    "SH"
+  ],
+  "max_price": 15.0,
+  "max_market_cap_yi": 120.0,
+  "market_cap_kind": "total",
+  "topn": 30,
+  "rebalance_freq": "W-FRI",
+  "holding_period": 5,
+  "kline_count": 320,
+  "initial_account": 1000000.0,
+  "open_cost": 0.0,
+  "close_cost": 0.0,
+  "slippage": 0.0,
+  "output_dir": "outputs",
+  "enable_data_cache": true,
+  "cache_dir": "cache",
+  "force_refresh_cache": false,
+  "debug_max_codes": 0,
+  "enable_capital_flow_factor": true,
+  "enable_board_heat_factor": false,
+  "enable_unusual_factor": true,
+  "factor_weights": {
+    "momentum_20": 0.25,
+    "momentum_60": 0.15,
+    "volatility_20": -0.15,
+    "amount_mean_20": 0.15,
+    "turnover_mean_20": 0.1,
+    "price_strength_20": 0.15,
+    "capital_flow_strength": 0.1,
+    "unusual_count": 0.05
+  }
+}
