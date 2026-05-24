@@ -47,6 +47,12 @@ except ImportError:
     send_from_directory = None
 
 CONFIG_FILE = _THIS_DIR / "workflow_opentdx_config.json"
+BENCHMARK_NAMES = {
+    "000300.SH": "沪深300",
+    "000852.SH": "中证1000",
+    "999999.SH": "上证综指",
+    "932000.SH": "中证2000",
+}
 
 
 @dataclass
@@ -61,7 +67,7 @@ class OpenTdxWorkflowConfig:
     topn: int = 30
     rebalance_freq: str = "W-FRI"
     holding_period: int = 5
-    kline_count: int = 320
+    kline_count: int = 360
     initial_account: float = 1_000_000.0
     open_cost: float = 0.0
     close_cost: float = 0.0
@@ -71,19 +77,22 @@ class OpenTdxWorkflowConfig:
     cache_dir: str = "cache"
     force_refresh_cache: bool = False
     debug_max_codes: int = 30
+    # v2 新增：因子库配置
+    enabled_factor_groups: list[str] = field(default_factory=lambda: [
+        "momentum", "reversal", "volatility", "turnover",
+        "corr", "position", "indicator", "relative_pattern", "share_change",
+    ])
+    # v2 新增：IC 筛选阈值
+    min_rank_ic_ir: float = 0.30
+    min_ic_win_rate: float = 0.55
+    # v2 新增：基准（默认沪深300，用于超额收益）
+    benchmark_codes: list[str] = field(default_factory=lambda: ["000300.SH", "000852.SH", "999999.SH", "932000.SH"])
+    # 兼容旧配置：保留但不再起作用
     enable_capital_flow_factor: bool = True
     enable_board_heat_factor: bool = False
     enable_unusual_factor: bool = True
-    factor_weights: dict[str, float] = field(default_factory=lambda: {
-        "momentum_20": 0.25,
-        "momentum_60": 0.15,
-        "volatility_20": -0.15,
-        "amount_mean_20": 0.15,
-        "turnover_mean_20": 0.10,
-        "price_strength_20": 0.15,
-        "capital_flow_strength": 0.10,
-        "unusual_count": 0.05,
-    })
+    enable_ml_strategy: bool = False
+    factor_weights: dict[str, float] = field(default_factory=dict)
 
 
 def load_saved_config() -> OpenTdxWorkflowConfig:
@@ -98,6 +107,10 @@ def load_saved_config() -> OpenTdxWorkflowConfig:
             merged["markets"] = [x.strip() for x in str(merged.get("markets", "SZ,SH,BJ")).split(",") if x.strip()]
         if not isinstance(merged.get("factor_weights"), dict):
             merged["factor_weights"] = default.factor_weights
+        if not isinstance(merged.get("enabled_factor_groups"), list):
+            merged["enabled_factor_groups"] = [x.strip() for x in str(merged.get("enabled_factor_groups", "")).split(",") if x.strip()] or default.enabled_factor_groups
+        if not isinstance(merged.get("benchmark_codes"), list):
+            merged["benchmark_codes"] = [x.strip() for x in str(merged.get("benchmark_codes", "")).split(",") if x.strip()] or default.benchmark_codes
         return OpenTdxWorkflowConfig(**merged)
     except Exception as exc:
         print(f"⚠️ 读取配置失败，使用默认配置: {exc}")
@@ -128,10 +141,17 @@ class OpenTdxWorkflow:
         self.panel: dict[str, pd.DataFrame] = {}
         self.future_return = pd.DataFrame()
         self.factor_dict: dict[str, pd.DataFrame] = {}
+        self.factor_groups: dict[str, str] = {}  # factor_name -> group_name
         self.standardized_factors: dict[str, pd.DataFrame] = {}
         self.factor_scores = pd.DataFrame()
+        self.strategy_scores: dict[str, pd.DataFrame] = {}
+        self.strategy_weights: dict[str, pd.DataFrame] = {}
         self.selection = pd.DataFrame()
         self.target_weights = pd.DataFrame()
+        self.selected_factors: list[str] = []  # IC 筛选后保留的因子
+        self.factor_directions: dict[str, int] = {}  # +1 或 -1（按 rank_ic 方向自动确定）
+        self.factor_auto_weights: dict[str, float] = {}
+        self.benchmark_close: dict[str, pd.Series] = {}  # ts_code -> close series
         self.results: dict[str, Any] = {}
 
     def run(self) -> dict[str, Any]:
@@ -152,20 +172,31 @@ class OpenTdxWorkflow:
         _timed("第二步:加载股票列表与报价", self._load_stock_list_and_quotes)
         pool_report = _timed("第二点五步:股票池过滤", self._filter_stock_pool)
         _timed("第三步:加载历史K线", self._load_market_data)
+        _timed("第三点五步:加载基准指数", self._load_benchmarks)
         _timed("第四步:构造未来收益", self._build_future_return)
         _timed("第五步:计算基础因子", self._build_factors)
         _timed("第六步:横截面标准化", self._standardize_factors)
         evaluation, rank_ic, quantile_returns = _timed("第七步:单因子评价", self._evaluate_factors)
+        filter_report, correlation = _timed("第七点五步:因子筛选与相关性", lambda: self._filter_factors(evaluation))
         _timed("第八步:构造综合信号", self._build_signals)
-        performance = _timed("第九步:组合回测", self._run_backtest)
-        # _run_backtest 已经把 equity_curve / returns / drawdown 写入 self.results，
-        # 用 update 而不是覆盖赋值，避免回测阶段的中间产物丢失。
+        performance, quantile_curves, benchmark_curves, excess_metrics = _timed(
+            "第九步:组合回测+分位+基准", self._run_backtest_full,
+        )
         self.results.update({
             "stock_pool_report": pool_report,
             "factor_evaluation": evaluation,
             "rank_ic": rank_ic,
             "quantile_returns": quantile_returns,
+            "factor_filter_report": filter_report,
+            "factor_correlation": correlation,
+            "factor_auto_weights": pd.DataFrame(
+                [{"factor": k, "direction": self.factor_directions.get(k, 1), "weight": v}
+                 for k, v in self.factor_auto_weights.items()]
+            ),
             "performance": performance,
+            "quantile_curves": quantile_curves,
+            "benchmark_curves": benchmark_curves,
+            "excess_metrics": excess_metrics,
             "output_dir": str(self.output_dir),
         })
         _timed("第十步:保存结果", self._save_results)
@@ -259,7 +290,13 @@ class OpenTdxWorkflow:
 
     def _load_market_data(self) -> None:
         codes = self.universe["ts_code"].astype(str).tolist()
-        self.panel = self.loader.load_kline_panel(codes, count=int(self.config.kline_count))
+        count = self._effective_kline_count()
+        self.panel = self.loader.load_kline_panel(
+            codes,
+            count=count,
+            start_time=self.config.start_time,
+            end_time=self.config.end_time,
+        )
         close = self.panel.get("close", pd.DataFrame())
         if close.empty:
             raise RuntimeError("历史 K 线 close 面板为空")
@@ -272,57 +309,91 @@ class OpenTdxWorkflow:
             raise RuntimeError("按日期截断后 close 面板为空")
         print(f"✅ close 面板形状: {self.panel['close'].shape}")
 
+    def _effective_kline_count(self) -> int:
+        base = max(int(self.config.kline_count), 1)
+        try:
+            start = pd.to_datetime(self.config.start_time)
+            end = pd.to_datetime(self.config.end_time)
+            span_days = max(int((end - start).days), 1)
+            auto_count = span_days + 260
+        except Exception:
+            span_days = 0
+            auto_count = base
+        count = max(base, auto_count)
+        print(f"  自动K线请求数量: 配置下限={base}, 日期跨度={span_days}天, 实际请求={count}根")
+        return count
+
     def _build_future_return(self) -> None:
         close = self.panel["close"]
         hp = max(int(self.config.holding_period), 1)
         self.future_return = close.shift(-hp) / close - 1.0
         print(f"✅ future_return 形状: {self.future_return.shape}, holding_period={hp}")
 
+    def _load_benchmarks(self) -> None:
+        """加载基准指数 K 线，落到 self.benchmark_close（dict[ts_code -> Series]）。"""
+        self.benchmark_close = {}
+        if not self.config.benchmark_codes:
+            return
+        for ts_code in self.config.benchmark_codes:
+            ts_code = str(ts_code).strip().upper()
+            if not (ts_code.endswith(".SH") or ts_code.endswith(".SZ")):
+                print(f"⚠️ 基准 {ts_code} 未带交易所后缀，跳过；请用 000300.SH 这种格式，避免和股票代码混淆")
+                continue
+            try:
+                suffix = "上海" if ts_code.endswith(".SH") else "深圳"
+                name = BENCHMARK_NAMES.get(ts_code, "指数")
+                print(f"  准备加载基准指数: {name} {ts_code}（{suffix}市场指数代码，走 index_kline 缓存）")
+                df = self.loader.load_index_kline(
+                    ts_code,
+                    count=self._effective_kline_count(),
+                    start_time=self.config.start_time,
+                    end_time=self.config.end_time,
+                )
+                if isinstance(df, pd.DataFrame) and not df.empty and "close" in df.columns:
+                    self.benchmark_close[ts_code] = pd.to_numeric(df["close"], errors="coerce").dropna()
+                    print(f"  基准 {name} {ts_code} K线 {len(df)} 行")
+            except Exception as exc:
+                print(f"⚠️ 基准 {ts_code} 加载失败: {exc}")
+        print(f"✅ 加载基准 {len(self.benchmark_close)} / {len(self.config.benchmark_codes)}")
+
     def _build_factors(self) -> None:
+        """从 factors/ 子模块自动收集所有因子（按 enabled_factor_groups 启用）。"""
+        import importlib
+
         close = self.panel["close"]
-        amount = self.panel.get("amount", pd.DataFrame()).reindex_like(close)
-        turnover = self.panel.get("turnover", pd.DataFrame()).reindex_like(close)
-        returns = close.pct_change()
-        factors: dict[str, pd.DataFrame] = {
-            "momentum_20": close / close.shift(20) - 1.0,
-            "momentum_60": close / close.shift(60) - 1.0,
-            "volatility_20": returns.rolling(20).std(),
-            "amount_mean_20": amount.rolling(20).mean(),
-            "price_strength_20": close / close.rolling(20).mean() - 1.0,
-        }
-        if not turnover.empty and turnover.notna().sum().sum() > 0:
-            factors["turnover_mean_20"] = turnover.rolling(20).mean()
-        if self.config.enable_capital_flow_factor:
-            factors["capital_flow_strength"] = self._build_capital_flow_factor(close)
-        if self.config.enable_unusual_factor:
-            factors["unusual_count"] = self._build_unusual_factor(close)
-        self.factor_dict = {k: v.reindex_like(close) for k, v in factors.items() if not v.empty}
-        print(f"✅ 已构造 {len(self.factor_dict)} 个基础因子: {list(self.factor_dict)}")
+        # 准备 ctx：用第一只基准（默认上证综指）作为相对强度类的对标
+        index_close = pd.Series(dtype=float)
+        if self.benchmark_close:
+            index_close = next(iter(self.benchmark_close.values()))
+        ctx: dict[str, Any] = {"index_close": index_close, "config": self.config}
 
-    def _build_capital_flow_factor(self, close: pd.DataFrame) -> pd.DataFrame:
-        try:
-            codes = self.universe["ts_code"].astype(str).tolist()
-            df = self.loader.load_capital_flow(codes)
-            if df.empty:
-                return pd.DataFrame(index=close.index, columns=close.columns, dtype=float)
-            numeric = df.set_index("ts_code").apply(pd.to_numeric, errors="coerce")
-            candidates = [c for c in numeric.columns if any(x in c for x in ["主力", "主买", "净", "流入"])]
-            series = numeric[candidates].sum(axis=1) if candidates else numeric.sum(axis=1)
-            return pd.DataFrame([series.reindex(close.columns)] * len(close.index), index=close.index, columns=close.columns)
-        except Exception as exc:
-            print(f"⚠️ 资金流因子构造失败，跳过: {exc}")
-            return pd.DataFrame(index=close.index, columns=close.columns, dtype=float)
-
-    def _build_unusual_factor(self, close: pd.DataFrame) -> pd.DataFrame:
-        try:
-            events = self.loader.load_monitor_events(self.config.markets, count=5000)
-            if events.empty or "ts_code" not in events.columns:
-                return pd.DataFrame(index=close.index, columns=close.columns, dtype=float)
-            counts = events.groupby("ts_code").size().astype(float)
-            return pd.DataFrame([counts.reindex(close.columns).fillna(0.0)] * len(close.index), index=close.index, columns=close.columns)
-        except Exception as exc:
-            print(f"⚠️ 异动因子构造失败，跳过: {exc}")
-            return pd.DataFrame(index=close.index, columns=close.columns, dtype=float)
+        groups = self.config.enabled_factor_groups or []
+        all_factors: dict[str, pd.DataFrame] = {}
+        all_groups: dict[str, str] = {}
+        for group in groups:
+            try:
+                mod = importlib.import_module(f"factors.{group}")
+                got = mod.get_factors(self.panel, ctx)
+            except Exception as exc:
+                print(f"⚠️ factors.{group} 加载失败，跳过: {exc}")
+                continue
+            cnt = 0
+            for name, df in got.items():
+                if not isinstance(df, pd.DataFrame) or df.empty:
+                    continue
+                aligned = df.reindex_like(close).astype(float)
+                # 过滤全 NaN 的因子
+                if aligned.notna().sum().sum() == 0:
+                    continue
+                all_factors[name] = aligned
+                all_groups[name] = group
+                cnt += 1
+            print(f"  factors.{group} -> {cnt} 个")
+        if not all_factors:
+            raise RuntimeError("所有因子组都返回空，请检查 enabled_factor_groups 与 K 线数据")
+        self.factor_dict = all_factors
+        self.factor_groups = all_groups
+        print(f"✅ 已构造 {len(self.factor_dict)} 个因子，覆盖 {len(set(all_groups.values()))} 组")
 
     @staticmethod
     def _winsorize_zscore(df: pd.DataFrame, limit: float = 5.0) -> pd.DataFrame:
@@ -377,65 +448,355 @@ class OpenTdxWorkflow:
         mask.loc[first_dates] = True
         return mask
 
+    def _filter_factors(self, evaluation: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
+        """按 IC_IR 与胜率筛选因子，并算因子相关性。"""
+        if evaluation.empty:
+            self.selected_factors = []
+            self.factor_directions = {}
+            return pd.DataFrame(), pd.DataFrame()
+        thresh_ir = float(self.config.min_rank_ic_ir)
+        thresh_win = float(self.config.min_ic_win_rate)
+        rows = []
+        for _, r in evaluation.iterrows():
+            name = r["factor"]
+            ric_ir = float(r.get("rank_ic_ir", 0.0))
+            win = float(r.get("ic_win_rate", 0.0))
+            # 接受双向：|IR| >= 阈值 且 max(win, 1-win) >= 阈值
+            keep = (abs(ric_ir) >= thresh_ir) and (max(win, 1.0 - win) >= thresh_win)
+            direction = 1 if ric_ir >= 0 else -1
+            reason = ""
+            if not keep:
+                if abs(ric_ir) < thresh_ir:
+                    reason = f"|rank_ic_ir|<{thresh_ir}"
+                else:
+                    reason = f"胜率偏离 0.5 不足 {thresh_win}"
+            rows.append({
+                "factor": name,
+                "group": self.factor_groups.get(name, ""),
+                "rank_ic_ir": ric_ir,
+                "rank_ic_mean": float(r.get("rank_ic_mean", 0.0)),
+                "ic_win_rate": win,
+                "direction": direction,
+                "kept": bool(keep),
+                "reason": reason,
+            })
+        report = pd.DataFrame(rows)
+        kept = report.loc[report["kept"]].copy()
+        self.selected_factors = kept["factor"].tolist()
+        self.factor_directions = {row["factor"]: int(row["direction"]) for _, row in kept.iterrows()}
+        # 全量 IR 映射（含未通过筛选的，回退路径会用）
+        self.factor_ir_map = evaluation.set_index("factor")["rank_ic_ir"].to_dict()
+        # 因子相关性（仅在保留的因子之间），用每日横截面排名相关均值作为代理
+        if self.selected_factors:
+            future = self.future_return
+            sample_dates = future.index[::max(len(future.index) // 30, 1)]
+            corr_sum = pd.DataFrame(0.0, index=self.selected_factors, columns=self.selected_factors)
+            n_dates = 0
+            for dt in sample_dates:
+                vecs = {}
+                for name in self.selected_factors:
+                    df = self.standardized_factors.get(name)
+                    if df is None or dt not in df.index:
+                        continue
+                    s = df.loc[dt].rank()
+                    if s.notna().sum() < 5:
+                        continue
+                    vecs[name] = s
+                if len(vecs) < 2:
+                    continue
+                cdf = pd.DataFrame(vecs).corr().reindex(index=self.selected_factors, columns=self.selected_factors)
+                corr_sum = corr_sum.add(cdf.fillna(0.0), fill_value=0.0)
+                n_dates += 1
+            correlation = corr_sum / max(n_dates, 1)
+        else:
+            correlation = pd.DataFrame()
+        kept_n, dropped_n = int(report["kept"].sum()), int((~report["kept"]).sum())
+        print(f"✅ 因子筛选: 保留 {kept_n} / 剔除 {dropped_n}（阈值 |IR|≥{thresh_ir}, 胜率偏离≥{thresh_win}）")
+        return report, correlation
+
     def _build_signals(self) -> None:
         close = self.panel["close"]
-        weights = {k: float(v) for k, v in self.config.factor_weights.items() if k in self.standardized_factors}
-        if not weights:
-            raise RuntimeError("没有可用因子权重")
-        scale = sum(abs(v) for v in weights.values()) or 1.0
+        ir_map = getattr(self, "factor_ir_map", {}) or {}
+        # 选用 IC 筛选后的因子；若一个都没保留则回退到 IR 绝对值 Top5
+        selected = list(self.selected_factors)
+        if not selected and ir_map:
+            top = sorted(ir_map.items(), key=lambda kv: abs(kv[1]), reverse=True)[:5]
+            selected = [name for name, _ in top]
+            self.factor_directions = {name: (1 if ir >= 0 else -1) for name, ir in top}
+            print(f"⚠️ 没有因子通过筛选，回退到 IR 绝对值 Top5: {selected}")
+        if not selected:
+            raise RuntimeError("没有可用因子用于合成信号")
+
+        # IC_IR 加权
+        raw_weights = {name: abs(float(ir_map.get(name, 0.0))) for name in selected}
+        scale = sum(raw_weights.values()) or 1.0
+        self.factor_auto_weights = {k: v / scale for k, v in raw_weights.items()}
+
+        # 合成分数：方向 × 标准化因子 × 权重
         score = pd.DataFrame(0.0, index=close.index, columns=close.columns)
-        for name, weight in weights.items():
-            score = score.add(self.standardized_factors[name].reindex_like(close).fillna(0.0) * (weight / scale), fill_value=0.0)
+        for name in selected:
+            df = self.standardized_factors.get(name)
+            if df is None:
+                continue
+            d = float(self.factor_directions.get(name, 1))
+            w = float(self.factor_auto_weights.get(name, 0.0))
+            score = score.add(df.reindex_like(close).fillna(0.0) * (d * w), fill_value=0.0)
         self.factor_scores = score
+
+        # 多策略信号：IC加权、多因子等权、动量、低波动、机器学习线性预测
+        equal_score = pd.DataFrame(0.0, index=close.index, columns=close.columns)
+        for name in selected:
+            df = self.standardized_factors.get(name)
+            if df is not None:
+                equal_score = equal_score.add(df.reindex_like(close).fillna(0.0) * float(self.factor_directions.get(name, 1)), fill_value=0.0)
+        equal_score = equal_score / max(len(selected), 1)
+
+        momentum_score = self.standardized_factors.get("mom_20", score).reindex_like(close).fillna(0.0)
+        lowvol_base = self.standardized_factors.get("vol_20", score).reindex_like(close).fillna(0.0)
+        lowvol_score = -lowvol_base
+        self.strategy_scores = {
+            "ic_weighted": score,
+            "equal_weighted": equal_score,
+            "momentum_20": momentum_score,
+            "low_volatility": lowvol_score,
+        }
+        if bool(self.config.enable_ml_strategy):
+            ml_score = self._build_ml_linear_score(selected)
+            self.strategy_scores["ml_linear"] = ml_score
+        else:
+            print("ℹ️ 机器学习策略未启用，跳过 ml_linear")
+        self.strategy_weights = {}
+        for name, score_df in self.strategy_scores.items():
+            self.strategy_weights[name] = self._score_to_target_weights(score_df)
+        self.selection = self.strategy_weights["ic_weighted"].gt(0)
+        self.target_weights = self.strategy_weights["ic_weighted"]
+        print(f"✅ 信号完成: 策略 {len(self.strategy_weights)} 个，因子 {len(selected)} 个，TopN={self.config.topn}")
+
+    def _score_to_target_weights(self, score: pd.DataFrame) -> pd.DataFrame:
+        close = self.panel["close"]
+        score = score.reindex_like(close)
         rebalance = self._build_rebalance_mask(close.index)
-        selection = pd.DataFrame(False, index=close.index, columns=close.columns)
-        for dt in close.index[rebalance.values]:
-            row = score.loc[dt].replace([np.inf, -np.inf], np.nan).dropna().sort_values(ascending=False)
-            selected = row.head(max(int(self.config.topn), 1)).index.tolist()
-            if selected:
-                selection.loc[dt, selected] = True
-        self.selection = selection
         target = pd.DataFrame(0.0, index=close.index, columns=close.columns)
         last = pd.Series(0.0, index=close.columns)
         for dt in close.index:
             if bool(rebalance.get(dt, False)):
-                picked = selection.loc[dt]
-                count = int(picked.sum())
-                last = picked.astype(float) / count if count > 0 else pd.Series(0.0, index=close.columns)
+                row = score.loc[dt].replace([np.inf, -np.inf], np.nan).dropna().sort_values(ascending=False)
+                picked = row.head(max(int(self.config.topn), 1)).index.tolist()
+                last = pd.Series(0.0, index=close.columns)
+                if picked:
+                    last.loc[picked] = 1.0 / len(picked)
             target.loc[dt] = last.values
-        self.target_weights = target.shift(1).fillna(0.0)
-        print(f"✅ 信号完成: 调仓次数={int(selection.any(axis=1).sum())}, TopN={self.config.topn}")
+        return target.shift(1).fillna(0.0)
 
-    def _run_backtest(self) -> pd.DataFrame:
+    def _build_ml_linear_score(self, selected: list[str]) -> pd.DataFrame:
         close = self.panel["close"]
-        weights = self.target_weights.reindex_like(close).fillna(0.0)
-        ret = close.pct_change().fillna(0.0)
-        gross = (weights.shift(1).fillna(0.0) * ret).sum(axis=1)
-        turnover = weights.diff().abs().sum(axis=1).fillna(0.0)
-        cost = turnover * (float(self.config.open_cost) + float(self.config.close_cost) + float(self.config.slippage))
-        strategy_ret = gross - cost
-        equity = (1.0 + strategy_ret).cumprod() * float(self.config.initial_account)
-        drawdown = equity / equity.cummax() - 1.0
-        self.results["equity_curve"] = equity
-        self.results["returns"] = strategy_ret
-        self.results["drawdown"] = drawdown
-        total_return = float(equity.iloc[-1] / equity.iloc[0] - 1.0) if len(equity) > 1 else 0.0
-        days = max((equity.index[-1] - equity.index[0]).days, 1) if len(equity) > 1 else 1
-        annual_return = (1.0 + total_return) ** (365.0 / days) - 1.0
-        sharpe = float(strategy_ret.mean() / strategy_ret.std() * np.sqrt(252)) if float(strategy_ret.std()) > 0 else 0.0
-        performance = pd.DataFrame([{
-            "signal": "opentdx_basic_multifactor",
-            "start": str(equity.index[0].date()) if len(equity) else "",
-            "end": str(equity.index[-1].date()) if len(equity) else "",
-            "total_return": total_return,
-            "annual_return": annual_return,
-            "max_drawdown": float(drawdown.min()) if len(drawdown) else 0.0,
-            "sharpe": sharpe,
-            "final_equity": float(equity.iloc[-1]) if len(equity) else float(self.config.initial_account),
-        }])
-        print("✅ 回测完成")
+        if not selected:
+            return self.factor_scores.copy()
+        ir_map = getattr(self, "factor_ir_map", {}) or {}
+        selected = sorted(selected, key=lambda x: abs(float(ir_map.get(x, 0.0))), reverse=True)[:20]
+        print(f"  ML策略开始: 使用 Top{len(selected)} 因子，样本股票 {close.shape[1]} 只，日期 {close.shape[0]} 天")
+        future = self.future_return.reindex_like(close)
+        score = pd.DataFrame(np.nan, index=close.index, columns=close.columns, dtype=float)
+        rebalance = self._build_rebalance_mask(close.index)
+        rebalance_dates = [dt for i, dt in enumerate(close.index) if bool(rebalance.get(dt, False)) and i >= max(40, int(self.config.holding_period) * 8)]
+        total_jobs = max(len(rebalance_dates), 1)
+        done_jobs = 0
+        min_train_days = max(40, int(self.config.holding_period) * 8)
+        ridge = 1e-3
+        dates = list(close.index)
+        for i, dt in enumerate(dates):
+            if not bool(rebalance.get(dt, False)) or i < min_train_days:
+                continue
+            done_jobs += 1
+            if done_jobs == 1 or done_jobs == total_jobs or done_jobs % 10 == 0:
+                print(f"  ML训练进度 {done_jobs}/{total_jobs} ({done_jobs / total_jobs * 100:.1f}%) 当前调仓日 {pd.Timestamp(dt).date()}", flush=True)
+            train_dates = dates[max(0, i - 252):i]
+            xs, ys = [], []
+            for td in train_dates:
+                y = future.loc[td] if td in future.index else None
+                if y is None:
+                    continue
+                mats = []
+                for fname in selected:
+                    f = self.standardized_factors.get(fname)
+                    if f is not None and td in f.index:
+                        mats.append(f.loc[td].reindex(close.columns))
+                if len(mats) != len(selected):
+                    continue
+                xdf = pd.concat(mats, axis=1)
+                xdf.columns = selected
+                tmp = xdf.assign(_y=y).replace([np.inf, -np.inf], np.nan).dropna()
+                if len(tmp) >= max(10, len(selected) + 2):
+                    xs.append(tmp[selected].to_numpy(dtype=float))
+                    ys.append(tmp["_y"].to_numpy(dtype=float))
+            if not xs:
+                continue
+            x = np.vstack(xs)
+            y = np.concatenate(ys)
+            if len(y) < max(50, len(selected) * 3):
+                continue
+            x_mean = x.mean(axis=0)
+            x_std = x.std(axis=0)
+            x_std[x_std == 0] = 1.0
+            xz = (x - x_mean) / x_std
+            y_center = y - y.mean()
+            xtx = xz.T @ xz + ridge * np.eye(len(selected))
+            try:
+                beta = np.linalg.solve(xtx, xz.T @ y_center)
+            except np.linalg.LinAlgError:
+                beta = np.linalg.pinv(xtx) @ xz.T @ y_center
+            today_cols = []
+            for fname in selected:
+                f = self.standardized_factors.get(fname)
+                today_cols.append(f.loc[dt].reindex(close.columns) if f is not None and dt in f.index else pd.Series(np.nan, index=close.columns))
+            today_x = pd.concat(today_cols, axis=1)
+            today_x.columns = selected
+            pred = ((today_x - x_mean) / x_std).to_numpy(dtype=float) @ beta
+            score.loc[dt] = pred
+        score = score.ffill().reindex_like(close)
+        if score.notna().sum().sum() == 0:
+            print("⚠️ 机器学习策略训练样本不足，回退到 IC 加权分数")
+            return self.factor_scores.copy()
+        print("✅ 机器学习线性策略完成: 滚动 Ridge 横截面预测")
+        return score.fillna(self.factor_scores)
+
+    def _run_backtest_full(self) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+        """组合回测 + 5 分位组净值 + 基准对齐与超额指标。"""
+        close = self.panel["close"]
+        ret = close.pct_change(fill_method=None).fillna(0.0)
+        rows = []
+        strategy_returns: dict[str, pd.Series] = {}
+        strategy_equity: dict[str, pd.Series] = {}
+        strategy_drawdown: dict[str, pd.Series] = {}
+        weights_map = self.strategy_weights or {"ic_weighted": self.target_weights}
+        for name, weight_df in weights_map.items():
+            weights = weight_df.reindex_like(close).fillna(0.0)
+            gross = (weights.shift(1).fillna(0.0) * ret).sum(axis=1)
+            turnover = weights.diff().abs().sum(axis=1).fillna(0.0)
+            cost = turnover * (float(self.config.open_cost) + float(self.config.close_cost) + float(self.config.slippage))
+            strategy_ret = gross - cost
+            equity = (1.0 + strategy_ret).cumprod() * float(self.config.initial_account)
+            drawdown = equity / equity.cummax() - 1.0
+            strategy_returns[name] = strategy_ret
+            strategy_equity[name] = equity
+            strategy_drawdown[name] = drawdown
+            total_return = float(equity.iloc[-1] / equity.iloc[0] - 1.0) if len(equity) > 1 else 0.0
+            days = max((equity.index[-1] - equity.index[0]).days, 1) if len(equity) > 1 else 1
+            annual_return = (1.0 + total_return) ** (365.0 / days) - 1.0
+            sharpe = float(strategy_ret.mean() / strategy_ret.std() * np.sqrt(252)) if float(strategy_ret.std()) > 0 else 0.0
+            rows.append({
+                "signal": f"opentdx_v2_{name}",
+                "start": str(equity.index[0].date()) if len(equity) else "",
+                "end": str(equity.index[-1].date()) if len(equity) else "",
+                "total_return": total_return,
+                "annual_return": annual_return,
+                "max_drawdown": float(drawdown.min()) if len(drawdown) else 0.0,
+                "sharpe": sharpe,
+                "final_equity": float(equity.iloc[-1]) if len(equity) else float(self.config.initial_account),
+            })
+        performance = pd.DataFrame(rows)
+        primary = "ic_weighted" if "ic_weighted" in strategy_equity else next(iter(strategy_equity))
+        self.results["equity_curve"] = strategy_equity[primary]
+        self.results["returns"] = strategy_returns[primary]
+        self.results["drawdown"] = strategy_drawdown[primary]
+        self.results["strategy_equity_curves"] = pd.DataFrame({k: v / float(self.config.initial_account) for k, v in strategy_equity.items()})
+        print("✅ 多策略回测完成")
         print(performance.to_string(index=False))
-        return performance
+
+        # ---- 5 分位组累计净值 ----
+        quantile_curves = self._compute_quantile_curves(ret)
+
+        # ---- 基准对齐与超额指标 ----
+        benchmark_curves, excess_metrics = self._compute_benchmark_curves(strategy_returns)
+
+        return performance, quantile_curves, benchmark_curves, excess_metrics
+
+    def _compute_quantile_curves(self, daily_ret: pd.DataFrame) -> pd.DataFrame:
+        """按综合分数把每个调仓日 universe 分 5 组等权，逐日推进，返回 (date × Q1..Q5+LS) 净值。"""
+        score = self.factor_scores
+        if score.empty:
+            return pd.DataFrame()
+        close = self.panel["close"]
+        rebalance = self._build_rebalance_mask(close.index)
+        rebalance_dates = list(close.index[rebalance.values])
+        if not rebalance_dates:
+            return pd.DataFrame()
+
+        n_q = 5
+        weights_by_q: dict[int, pd.DataFrame] = {q: pd.DataFrame(0.0, index=close.index, columns=close.columns) for q in range(1, n_q + 1)}
+        last_w: dict[int, pd.Series] = {q: pd.Series(0.0, index=close.columns) for q in range(1, n_q + 1)}
+        for dt in close.index:
+            if bool(rebalance.get(dt, False)):
+                row = score.loc[dt].replace([np.inf, -np.inf], np.nan).dropna()
+                if len(row) >= n_q:
+                    ranks = row.rank(pct=True)
+                    for q in range(1, n_q + 1):
+                        low, high = (q - 1) / n_q, q / n_q
+                        if q == 1:
+                            mask = (ranks >= low) & (ranks <= high)
+                        else:
+                            mask = (ranks > low) & (ranks <= high)
+                        codes = ranks.index[mask].tolist()
+                        cnt = len(codes)
+                        w = pd.Series(0.0, index=close.columns)
+                        if cnt > 0:
+                            w.loc[codes] = 1.0 / cnt
+                        last_w[q] = w
+            for q in range(1, n_q + 1):
+                weights_by_q[q].loc[dt] = last_w[q].values
+
+        curves = pd.DataFrame(index=close.index)
+        for q in range(1, n_q + 1):
+            w_shift = weights_by_q[q].shift(1).fillna(0.0)
+            ret_q = (w_shift * daily_ret).sum(axis=1)
+            curves[f"Q{q}"] = (1.0 + ret_q).cumprod()
+        # 多空：Q5 - Q1
+        ls_ret = ((weights_by_q[n_q].shift(1).fillna(0.0) - weights_by_q[1].shift(1).fillna(0.0)) * daily_ret).sum(axis=1)
+        curves["LongShort"] = (1.0 + ls_ret).cumprod()
+        return curves
+
+    def _compute_benchmark_curves(self, strategy_returns: dict[str, pd.Series]) -> tuple[pd.DataFrame, pd.DataFrame]:
+        """把策略净值与基准对齐，返回 (curves, metrics) 两张表。"""
+        if not self.benchmark_close:
+            return pd.DataFrame(), pd.DataFrame()
+        if not strategy_returns:
+            return pd.DataFrame(), pd.DataFrame()
+        primary_name = "ic_weighted" if "ic_weighted" in strategy_returns else next(iter(strategy_returns))
+        idx = strategy_returns[primary_name].index
+        curves = pd.DataFrame(index=idx)
+        for name, ret_s in strategy_returns.items():
+            curves[f"strategy_{name}"] = (1.0 + ret_s.reindex(idx).fillna(0.0)).cumprod()
+        rows = []
+        n_days = max((idx[-1] - idx[0]).days, 1) if len(idx) > 1 else 1
+        for ts_code, close_series in self.benchmark_close.items():
+            bench = close_series.reindex(idx).ffill()
+            if bench.dropna().empty:
+                continue
+            first_label = bench.first_valid_index()
+            base_val = float(bench.loc[first_label]) if first_label is not None else float("nan")
+            bench_norm = bench / base_val if base_val and not np.isnan(base_val) else bench
+            curves[ts_code] = bench_norm
+            bench_ret = bench.pct_change(fill_method=None).fillna(0.0)
+            bench_total = float(bench.iloc[-1] / base_val - 1.0) if base_val else 0.0
+            bench_annual = (1.0 + bench_total) ** (365.0 / n_days) - 1.0
+            for name, strategy_ret in strategy_returns.items():
+                sr = strategy_ret.reindex(idx).fillna(0.0)
+                excess = sr - bench_ret
+                ann_excess = float((1.0 + excess.mean()) ** 252 - 1.0) if not excess.empty else 0.0
+                ir = float(excess.mean() / excess.std() * np.sqrt(252)) if float(excess.std()) > 0 else 0.0
+                win = float((excess > 0).mean())
+                corr = float(sr.corr(bench_ret)) if sr.std() > 0 and bench_ret.std() > 0 else 0.0
+                rows.append({
+                    "signal": f"opentdx_v2_{name}",
+                    "benchmark": ts_code,
+                    "annual_excess": ann_excess,
+                    "information_ratio": ir,
+                    "daily_win_rate": win,
+                    "correlation": corr,
+                    "benchmark_total_return": bench_total,
+                    "benchmark_annual_return": bench_annual,
+                })
+        return curves, pd.DataFrame(rows)
 
     def _save_results(self) -> None:
         (self.output_dir / "factor_values").mkdir(parents=True, exist_ok=True)
@@ -458,10 +819,18 @@ class OpenTdxWorkflow:
         self.factor_scores.to_csv(self.output_dir / "factor_scores.csv", encoding="utf-8-sig")
         self.selection.to_csv(self.output_dir / "selection.csv", encoding="utf-8-sig")
         self.target_weights.to_csv(self.output_dir / "target_weights.csv", encoding="utf-8-sig")
-        for name in ["stock_pool_report", "factor_evaluation", "rank_ic", "quantile_returns", "performance"]:
+        for name, df in self.strategy_weights.items():
+            df.to_csv(self.output_dir / f"target_weights_{name}.csv", encoding="utf-8-sig")
+        df_outputs = [
+            "stock_pool_report", "factor_evaluation", "rank_ic", "quantile_returns",
+            "factor_filter_report", "factor_correlation", "factor_auto_weights",
+            "performance", "quantile_curves", "benchmark_curves", "excess_metrics", "strategy_equity_curves",
+        ]
+        index_keep = {"rank_ic", "factor_correlation", "quantile_curves", "benchmark_curves", "strategy_equity_curves"}
+        for name in df_outputs:
             value = self.results.get(name)
-            if isinstance(value, pd.DataFrame):
-                value.to_csv(self.output_dir / f"{name}.csv", index=name != "rank_ic", encoding="utf-8-sig")
+            if isinstance(value, pd.DataFrame) and not value.empty:
+                value.to_csv(self.output_dir / f"{name}.csv", index=(name in index_keep), encoding="utf-8-sig")
         for name in ["equity_curve", "returns", "drawdown"]:
             value = self.results.get(name)
             if isinstance(value, pd.Series):
@@ -495,6 +864,54 @@ class OpenTdxWorkflow:
             plt.tight_layout()
             plt.savefig(self.output_dir / "drawdown.png", dpi=150)
             plt.close()
+
+        # 5 分位组净值
+        qc = self.results.get("quantile_curves")
+        if isinstance(qc, pd.DataFrame) and not qc.empty:
+            plt.figure(figsize=(12, 5))
+            for col in qc.columns:
+                if col == "LongShort":
+                    qc[col].plot(linewidth=2.0, color="#000", linestyle="--", label="Q5-Q1")
+                else:
+                    qc[col].plot(linewidth=1.4, label=col)
+            plt.title("综合分数 5 分位组累计净值（看单调性）")
+            plt.xlabel("日期")
+            plt.ylabel("累计净值（起点 1.0）")
+            plt.legend()
+            plt.tight_layout()
+            plt.savefig(self.output_dir / "quantile_curves.png", dpi=150)
+            plt.close()
+
+        # 策略 vs 基准
+        bc = self.results.get("benchmark_curves")
+        if isinstance(bc, pd.DataFrame) and not bc.empty:
+            plt.figure(figsize=(12, 5))
+            for col in bc.columns:
+                lw = 2.1 if str(col).startswith("strategy_ic_weighted") else 1.3
+                bc[col].plot(linewidth=lw, label=col)
+            plt.title("多策略 vs 沪深300等基准（归一净值）")
+            plt.xlabel("日期")
+            plt.ylabel("归一净值")
+            plt.legend()
+            plt.tight_layout()
+            plt.savefig(self.output_dir / "equity_vs_benchmark.png", dpi=150)
+            plt.close()
+
+        # 因子 IC_IR 柱图（按绝对值排序，颜色区分保留/剔除）
+        report = self.results.get("factor_filter_report")
+        if isinstance(report, pd.DataFrame) and not report.empty:
+            df = report.copy().assign(absir=lambda d: d["rank_ic_ir"].abs())
+            df = df.sort_values("absir", ascending=False).head(40)
+            colors = ["#2e8b57" if k else "#bbbbbb" for k in df["kept"]]
+            plt.figure(figsize=(12, max(4, 0.25 * len(df))))
+            plt.barh(df["factor"][::-1], df["rank_ic_ir"][::-1], color=colors[::-1])
+            plt.axvline(0, color="#444", linewidth=0.8)
+            plt.title("因子 RankIC_IR（绿色=保留，灰色=剔除）")
+            plt.xlabel("RankIC_IR")
+            plt.tight_layout()
+            plt.savefig(self.output_dir / "factor_ic_bar.png", dpi=150)
+            plt.close()
+
         print("✅ 图表生成完成")
 
 
@@ -548,6 +965,25 @@ def _coerce_config(payload: dict[str, Any]) -> OpenTdxWorkflowConfig:
     return OpenTdxWorkflowConfig(**merged)
 
 
+def _json_safe(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {k: _json_safe(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_json_safe(v) for v in value]
+    if isinstance(value, tuple):
+        return [_json_safe(v) for v in value]
+    if isinstance(value, (np.floating, float)):
+        v = float(value)
+        return v if np.isfinite(v) else None
+    if isinstance(value, (np.integer, int)):
+        return int(value)
+    if isinstance(value, (np.bool_, bool)):
+        return bool(value)
+    if value is pd.NA or value is pd.NaT:
+        return None
+    return value
+
+
 def _run_workflow_background(config: OpenTdxWorkflowConfig) -> None:
     with _RUN_LOCK:
         _RUN_STATE.update({"running": True, "logs": [], "last_results": None, "error": None, "start_time": time.strftime("%Y-%m-%d %H:%M:%S"), "end_time": None})
@@ -563,19 +999,36 @@ def _run_workflow_background(config: OpenTdxWorkflowConfig) -> None:
         run_id = Path(output_dir).name if output_dir else ""
         image_urls: dict[str, str] = {}
         if run_id:
-            for key, fname in (("equity_curve", "equity_curve.png"), ("drawdown", "drawdown.png")):
+            chart_files = (
+                ("equity_curve", "equity_curve.png"),
+                ("drawdown", "drawdown.png"),
+                ("quantile_curves", "quantile_curves.png"),
+                ("equity_vs_benchmark", "equity_vs_benchmark.png"),
+                ("factor_ic_bar", "factor_ic_bar.png"),
+            )
+            for key, fname in chart_files:
                 if (Path(output_dir) / fname).exists():
                     image_urls[key] = f"/api/output/{run_id}/{fname}"
+        filter_report = results.get("factor_filter_report", pd.DataFrame())
+        auto_weights = results.get("factor_auto_weights", pd.DataFrame())
+        excess_metrics = results.get("excess_metrics", pd.DataFrame())
         with _RUN_LOCK:
-            _RUN_STATE["last_results"] = {
+            _RUN_STATE["last_results"] = _json_safe({
                 "performance": performance.to_dict(orient="records") if isinstance(performance, pd.DataFrame) else [],
-                "factor_evaluation_head": evaluation.head(20).to_dict(orient="records") if isinstance(evaluation, pd.DataFrame) else [],
+                "factor_evaluation_head": evaluation.head(30).to_dict(orient="records") if isinstance(evaluation, pd.DataFrame) else [],
+                "factor_filter_summary": ({
+                    "kept": int(filter_report["kept"].sum()),
+                    "dropped": int((~filter_report["kept"]).sum()),
+                    "top_kept": filter_report.loc[filter_report["kept"]].head(10).to_dict(orient="records"),
+                } if isinstance(filter_report, pd.DataFrame) and not filter_report.empty else {}),
+                "auto_weights": auto_weights.to_dict(orient="records") if isinstance(auto_weights, pd.DataFrame) else [],
+                "excess_metrics": excess_metrics.to_dict(orient="records") if isinstance(excess_metrics, pd.DataFrame) else [],
                 "output_dir": output_dir,
                 "run_id": run_id,
                 "image_urls": image_urls,
                 "step_times": results.get("step_times", []),
                 "total_time": results.get("total_time", 0.0),
-            }
+            })
     except Exception as exc:
         traceback.print_exc()
         with _RUN_LOCK:
@@ -591,11 +1044,19 @@ def _build_flask_app() -> Any:
     if Flask is None:
         raise ImportError("缺少 flask，请先 pip install flask")
     app = Flask(__name__, static_folder=None)
-    index_html = _render_index_html()
+
+    @app.after_request
+    def _no_cache(resp):
+        # 禁掉浏览器缓存，避免老牌页面老 JS 卡住
+        resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        resp.headers["Pragma"] = "no-cache"
+        resp.headers["Expires"] = "0"
+        return resp
 
     @app.route("/")
     def index():
-        return index_html
+        # 每次重新生成，保证代码热更新后能被看到
+        return _render_index_html()
 
     @app.route("/api/config")
     def api_config():
@@ -655,27 +1116,41 @@ def _render_index_html() -> str:
     # 用原始字符串，避免 JS 里的 \n 被 Python 当作真实换行符破坏脚本语法
     return r"""<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>OpenTDX 多因子控制台</title>
 <style>
-body{font-family:-apple-system,"Segoe UI","Microsoft Yahei",sans-serif;margin:0;padding:20px;background:#f5f6fa;color:#222}.layout{display:grid;grid-template-columns:440px 1fr;gap:16px}.panel{background:#fff;border-radius:8px;padding:16px;box-shadow:0 2px 6px rgba(0,0,0,.06)}h1{font-size:22px}.row{display:flex;gap:8px;margin:8px 0}.row label{flex:1;font-size:12px;color:#555}.row div{font-size:11px;color:#888;margin-bottom:2px}input,select{width:100%;box-sizing:border-box;padding:6px;border:1px solid #d0d7de;border-radius:4px}button{padding:8px 14px;border:0;border-radius:5px;background:#4a90e2;color:#fff;font-weight:600;cursor:pointer}button:disabled{background:#a4bfdf}.danger{background:#c0504d}.status{padding:8px;border-radius:5px;background:#e9ecef}.run{background:#fff3cd}.ok{background:#d4edda}.err{background:#f8d7da}pre{height:360px;overflow:auto;background:#1e1e2e;color:#d6e2f0;padding:10px;border-radius:6px;font-size:12px}table{border-collapse:collapse;width:100%;font-size:12px}th,td{border:1px solid #e1e4e8;padding:5px;text-align:right}th:first-child,td:first-child{text-align:left}
+body{font-family:-apple-system,"Segoe UI","Microsoft Yahei",sans-serif;margin:0;padding:8px;background:#f5f6fa;color:#222;font-size:12px}.layout{display:grid;grid-template-columns:360px 1fr;gap:8px;align-items:start}.main{display:grid;grid-template-columns:minmax(520px,1.25fr) minmax(360px,.75fr);gap:8px}.panel{background:#fff;border-radius:6px;padding:8px;box-shadow:0 1px 4px rgba(0,0,0,.05);overflow:auto}h1{font-size:16px;margin:0 0 6px}h2{font-size:14px;margin:0 0 6px}h3{font-size:13px;margin:8px 0 4px}.row{display:flex;gap:6px;margin:5px 0}.row label{flex:1;font-size:11px;color:#555}.row div{font-size:10px;color:#888;margin-bottom:1px}input,select{width:100%;box-sizing:border-box;padding:4px 5px;border:1px solid #d0d7de;border-radius:4px;height:26px;font-size:12px}button{padding:6px 10px;border:0;border-radius:5px;background:#4a90e2;color:#fff;font-weight:600;cursor:pointer;font-size:12px}button:disabled{background:#a4bfdf}.danger{background:#c0504d}.status{padding:5px;border-radius:5px;background:#e9ecef;margin-bottom:6px}.run{background:#fff3cd}.ok{background:#d4edda}.err{background:#f8d7da}pre{height:280px;overflow:auto;background:#1e1e2e;color:#d6e2f0;padding:8px;border-radius:5px;font-size:11px;line-height:1.25;margin:0}table{border-collapse:collapse;width:100%;font-size:11px;line-height:1.15}th,td{border:1px solid #e1e4e8;padding:3px 4px;text-align:right;white-space:nowrap}th:first-child,td:first-child{text-align:left}.table-scroll{max-height:290px;overflow:auto}.wide{grid-column:1 / -1}#timing table{font-size:10px}#timing td,#timing th{padding:2px 3px}#results p{margin:4px 0}#charts img{max-height:420px;object-fit:contain}.switch-row{display:flex;gap:8px;align-items:stretch;margin:6px 0}.switch-card{flex:1;border:1px solid #d0d7de;border-radius:6px;padding:7px 8px;background:#fafbfc;cursor:pointer;display:flex;gap:7px;align-items:center}.switch-card input{width:14px;height:14px;margin:0}.switch-card b{display:block;font-size:12px;color:#222}.switch-card span{display:block;font-size:10px;color:#777;margin-top:2px}.switch-card:has(input:checked){border-color:#4a90e2;background:#eef6ff}
 </style></head><body><h1>📊 OpenTDX 多因子控制台</h1><div class="layout"><form id="form" class="panel"><h2>运行参数</h2>
 <div class="row"><label><div>OpenTDX路径</div><input name="opentdx_path"></label></div>
 <div class="row"><label><div>开始日期</div><input name="start_time"></label><label><div>结束日期</div><input name="end_time"></label></div>
-<div class="row"><label><div>市场(SZ,SH,BJ)</div><input name="markets"></label><label><div>Debug最大股票数</div><input name="debug_max_codes" type="number"></label></div>
+<div class="row"><label><div>市场(SZ,SH,BJ)</div><input name="markets"></label><label><div>Debug最大股票数（0=全市场）</div><input name="debug_max_codes" type="number"></label></div>
 <div class="row"><label><div>股价上限</div><input name="max_price" type="number" step="0.1"></label><label><div>总市值上限(亿)</div><input name="max_market_cap_yi" type="number" step="1"></label></div>
 <div class="row"><label><div>TopN</div><input name="topn" type="number"></label><label><div>调仓频率</div><input name="rebalance_freq"></label><label><div>持有期</div><input name="holding_period" type="number"></label></div>
-<div class="row"><label><div>K线数量</div><input name="kline_count" type="number"></label><label><div>初始资金</div><input name="initial_account" type="number"></label></div>
-<div class="row"><label><input name="enable_data_cache" type="checkbox"> 使用缓存</label><label><input name="force_refresh_cache" type="checkbox"> 强制刷新</label></div>
-<div class="row"><label><input name="enable_capital_flow_factor" type="checkbox"> 资金流因子</label><label><input name="enable_unusual_factor" type="checkbox"> 异动因子</label></div>
+<input name="kline_count" type="hidden"><div class="row"><label><div>初始资金</div><input name="initial_account" type="number"></label></div>
+<div class="row"><label><div>启用因子组(逗号分隔)</div><input name="enabled_factor_groups"></label></div>
+<div class="row"><label><div>RankIC_IR最低绝对值</div><input name="min_rank_ic_ir" type="number" step="0.01"></label><label><div>IC方向胜率最低值</div><input name="min_ic_win_rate" type="number" step="0.01"></label></div>
+<div class="row"><label><div>基准指数(逗号分隔)</div><input name="benchmark_codes"></label></div>
+<div class="switch-row"><label class="switch-card"><input name="enable_ml_strategy" type="checkbox"><span><b>机器学习策略</b><span>勾选后额外运行 ML，较慢</span></span></label></div>
+<input name="enable_data_cache" type="hidden"><input name="force_refresh_cache" type="hidden">
+<div class="switch-row"><label class="switch-card"><input name="data_mode" type="radio" value="cache"><span><b>优先使用缓存</b><span>命中直接读，缺失自动下载</span></span></label><label class="switch-card"><input name="data_mode" type="radio" value="refresh"><span><b>强制重新下载</b><span>忽略旧缓存并覆盖</span></span></label></div>
 <div class="row"><button id="run" type="submit">▶ 运行</button><button id="clear" type="button" class="danger">清空缓存</button></div>
-<div id="cache" style="font-size:12px;color:#666">缓存状态读取中...</div></form><div><div class="panel"><h2>运行状态</h2><div id="status" class="status">空闲</div><pre id="logs">等待运行...</pre></div><div class="panel" style="margin-top:12px"><h2>步骤耗时</h2><div id="timing">运行后显示每步耗时与总耗时</div></div><div class="panel" style="margin-top:12px"><h2>结果摘要</h2><div id="results">暂无结果</div></div><div class="panel" style="margin-top:12px"><h2>图表</h2><div id="charts">运行后在这里查看净值与回撤图</div></div></div></div>
+<div id="cache" style="font-size:11px;color:#666">缓存状态读取中...</div></form><div class="main"><div class="panel"><h2>运行状态</h2><div id="status" class="status">空闲</div><pre id="logs">等待运行...</pre></div><div class="panel"><h2>步骤耗时</h2><div id="timing">运行后显示每步耗时与总耗时</div></div><div class="panel"><h2>结果摘要</h2><div id="results">暂无结果</div></div><div class="panel"><h2>图表</h2><div id="charts">运行后在这里查看净值与回撤图</div></div></div></div>
 <script>
 const form=document.getElementById('form'),btn=document.getElementById('run'),statusEl=document.getElementById('status'),logsEl=document.getElementById('logs'),resultsEl=document.getElementById('results');
-function fill(cfg){for(const[k,v]of Object.entries(cfg)){const el=form.elements.namedItem(k);if(!el)continue;if(el.type==='checkbox')el.checked=!!v;else if(Array.isArray(v))el.value=v.join(',');else if(typeof v!=='object')el.value=v;}}
-function read(){const d={};for(const el of form.elements){if(!el.name)continue;if(el.type==='checkbox')d[el.name]=el.checked;else if(el.name==='markets')d[el.name]=el.value.split(',').map(x=>x.trim()).filter(Boolean);else d[el.name]=el.value;}return d;}
-async function init(){const cfg=await fetch('/api/config').then(r=>r.json());fill(cfg);stats();poll();setInterval(poll,1500)}
+function fill(cfg){for(const[k,v]of Object.entries(cfg)){const el=form.elements.namedItem(k);if(!el)continue;if(el.type==='checkbox')el.checked=!!v;else if(Array.isArray(v))el.value=v.join(',');else if(typeof v!=='object')el.value=v;}const mode=cfg.force_refresh_cache?'refresh':'cache';const m=form.querySelector(`input[name="data_mode"][value="${mode}"]`);if(m)m.checked=true;}
+function read(){const d={};const listFields=new Set(['markets','enabled_factor_groups','benchmark_codes']);for(const el of form.elements){if(!el.name||el.name==='data_mode')continue;if(el.type==='checkbox')d[el.name]=el.checked;else if(listFields.has(el.name))d[el.name]=el.value.split(',').map(x=>x.trim()).filter(Boolean);else d[el.name]=el.value;}const mode=(form.querySelector('input[name="data_mode"]:checked')||{}).value||'cache';d.enable_data_cache=true;d.force_refresh_cache=mode==='refresh';return d;}
+async function init(){const cfg=await fetch('/api/config').then(r=>r.json());fill(cfg);stats();poll();setInterval(poll,800)}
+function fnum(v,d){return (v===null||v===undefined||(typeof v==='number'&&!Number.isFinite(v)))?'-':Number(v).toFixed(d);}
+function fpct(v,d){return (v===null||v===undefined||(typeof v==='number'&&!Number.isFinite(v)))?'-':(Number(v)*100).toFixed(d)+'%';}
 async function stats(){try{const s=await fetch('/api/cache/stats').then(r=>r.json());document.getElementById('cache').textContent=`缓存：${s.count} 个文件 / ${(s.size_bytes/1024/1024).toFixed(2)} MB`;}catch(e){document.getElementById('cache').textContent='缓存状态读取失败';}}
 let lastResultsKey='',lastLogsLen=0;
-async function poll(){try{const s=await fetch('/api/status').then(r=>r.json());btn.disabled=!!s.running;statusEl.className='status '+(s.running?'run':s.error?'err':s.last_results?'ok':'');statusEl.textContent=s.running?'运行中 '+s.start_time:(s.error?'失败 '+s.error:(s.last_results?'完成 '+(s.end_time||''):'空闲'));if(s.logs&&s.logs.length&&s.logs.length!==lastLogsLen){lastLogsLen=s.logs.length;logsEl.textContent=s.logs.join('\n');logsEl.scrollTop=logsEl.scrollHeight;}if(s.last_results){const key=(s.last_results.run_id||'')+'|'+(s.end_time||'');if(key!==lastResultsKey){lastResultsKey=key;render(s.last_results);}}}catch(e){}}
-function render(r){const tEl=document.getElementById('timing');if(r.step_times&&r.step_times.length){const tot=r.total_time||0;let th=`<p><b>总耗时：</b>${tot.toFixed(2)} s</p><table><tr><th>步骤</th><th>耗时(s)</th><th>占比</th></tr>`;for(const x of r.step_times){const pct=tot>0?(x.seconds/tot*100).toFixed(1):'0.0';th+=`<tr><td>${x.step}</td><td>${x.seconds.toFixed(2)}</td><td>${pct}%</td></tr>`;}th+='</table>';tEl.innerHTML=th;}else{tEl.textContent='本次运行未记录耗时';}let html=`<p>输出目录：${r.output_dir||''}</p>`;if(r.performance&&r.performance.length){html+='<table><tr><th>signal</th><th>total</th><th>annual</th><th>drawdown</th><th>sharpe</th></tr>';for(const x of r.performance){html+=`<tr><td>${x.signal}</td><td>${(x.total_return*100).toFixed(2)}%</td><td>${(x.annual_return*100).toFixed(2)}%</td><td>${(x.max_drawdown*100).toFixed(2)}%</td><td>${x.sharpe.toFixed(2)}</td></tr>`;}html+='</table>';}if(r.factor_evaluation_head&&r.factor_evaluation_head.length){html+='<h3>因子评价Top</h3><table><tr><th>factor</th><th>rank_ic</th><th>ir</th><th>win</th></tr>';for(const x of r.factor_evaluation_head){html+=`<tr><td>${x.factor}</td><td>${x.rank_ic_mean.toFixed(4)}</td><td>${x.rank_ic_ir.toFixed(3)}</td><td>${(x.ic_win_rate*100).toFixed(1)}%</td></tr>`;}html+='</table>';}resultsEl.innerHTML=html;const cEl=document.getElementById('charts');if(r.image_urls){const tag=r.run_id||'v';let ch='';if(r.image_urls.equity_curve)ch+=`<h3>净值曲线</h3><img style="max-width:100%;border:1px solid #e1e4e8;border-radius:4px" src="${r.image_urls.equity_curve}?v=${tag}">`;if(r.image_urls.drawdown)ch+=`<h3>回撤</h3><img style="max-width:100%;border:1px solid #e1e4e8;border-radius:4px" src="${r.image_urls.drawdown}?v=${tag}">`;cEl.innerHTML=ch||'本次运行未生成图表';}}
+async function poll(){let s;try{s=await fetch('/api/status',{cache:'no-store'}).then(r=>r.json());}catch(e){return;}try{btn.disabled=!!s.running;statusEl.className='status '+(s.running?'run':s.error?'err':s.last_results?'ok':'');statusEl.textContent=s.running?('运行中 '+s.start_time+' （日志 '+(s.logs?s.logs.length:0)+' 行）'):(s.error?'失败 '+s.error:(s.last_results?'✅ 完成 '+(s.end_time||''):'空闲'));const newLogs=(s.logs&&s.logs.length)?s.logs.join('\n'):'';if(newLogs!==logsEl.textContent){const wasAtBottom=Math.abs(logsEl.scrollHeight-logsEl.clientHeight-logsEl.scrollTop)<40;logsEl.textContent=newLogs||'等待运行...';if(wasAtBottom||s.running)logsEl.scrollTop=logsEl.scrollHeight;}}catch(e){console.warn('status update failed',e);}if(s.last_results){const key=(s.last_results.run_id||'')+'|'+(s.end_time||'');if(key!==lastResultsKey){lastResultsKey=key;try{render(s.last_results);}catch(e){console.error('render failed',e);resultsEl.innerHTML='<p style="color:#c0504d">渲染异常: '+e.message+'，请查看 F12 控制台。原始 JSON 见 /api/status。</p>';}}}}
+function render(r){const tEl=document.getElementById('timing');if(r.step_times&&r.step_times.length){const tot=r.total_time||0;let th=`<p><b>总耗时：</b>${fnum(tot,2)} s</p><table><tr><th>步骤</th><th>耗时(s)</th><th>占比</th></tr>`;for(const x of r.step_times){const pct=tot>0?(x.seconds/tot*100).toFixed(1):'0.0';th+=`<tr><td>${x.step}</td><td>${fnum(x.seconds,2)}</td><td>${pct}%</td></tr>`;}th+='</table>';tEl.innerHTML=th;}else{tEl.textContent='本次运行未记录耗时';}
+let html=`<p>输出目录：${r.output_dir||''}</p>`;
+if(r.performance&&r.performance.length){html+='<h3>多策略</h3><table><tr><th>signal</th><th>total</th><th>annual</th><th>drawdown</th><th>sharpe</th></tr>';for(const x of r.performance){html+=`<tr><td>${x.signal}</td><td>${fpct(x.total_return,2)}</td><td>${fpct(x.annual_return,2)}</td><td>${fpct(x.max_drawdown,2)}</td><td>${fnum(x.sharpe,2)}</td></tr>`;}html+='</table>';}
+if(r.factor_filter_summary&&typeof r.factor_filter_summary.kept!=='undefined'){const fs=r.factor_filter_summary;html+=`<h3>因子筛选：保留 ${fs.kept} / 剔除 ${fs.dropped}</h3>`;if(fs.top_kept&&fs.top_kept.length){html+='<table><tr><th>factor</th><th>group</th><th>rank_ic_ir</th><th>direction</th></tr>';for(const x of fs.top_kept){html+=`<tr><td>${x.factor}</td><td>${x.group||''}</td><td>${fnum(x.rank_ic_ir,3)}</td><td>${x.direction}</td></tr>`;}html+='</table>';}}
+if(r.auto_weights&&r.auto_weights.length){html+='<h3>自动权重 Top10</h3><table><tr><th>factor</th><th>direction</th><th>weight</th></tr>';for(const x of r.auto_weights.slice(0,10)){html+=`<tr><td>${x.factor}</td><td>${x.direction}</td><td>${fpct(x.weight,2)}</td></tr>`;}html+='</table>';}
+if(r.excess_metrics&&r.excess_metrics.length){html+='<h3>对沪深300超额</h3><table><tr><th>signal</th><th>benchmark</th><th>年化超额</th><th>IR</th><th>日胜率</th><th>相关性</th></tr>';for(const x of r.excess_metrics){html+=`<tr><td>${x.signal||''}</td><td>${x.benchmark}</td><td>${fpct(x.annual_excess,2)}</td><td>${fnum(x.information_ratio,2)}</td><td>${fpct(x.daily_win_rate,1)}</td><td>${fnum(x.correlation,2)}</td></tr>`;}html+='</table>';}
+if(r.factor_evaluation_head&&r.factor_evaluation_head.length){html+='<h3>因子评价Top</h3><table><tr><th>factor</th><th>rank_ic</th><th>ir</th><th>win</th></tr>';for(const x of r.factor_evaluation_head){html+=`<tr><td>${x.factor}</td><td>${fnum(x.rank_ic_mean,4)}</td><td>${fnum(x.rank_ic_ir,3)}</td><td>${fpct(x.ic_win_rate,1)}</td></tr>`;}html+='</table>';}
+resultsEl.innerHTML=html;
+const cEl=document.getElementById('charts');if(r.image_urls){const tag=r.run_id||'v';const order=[['equity_curve','净值曲线'],['equity_vs_benchmark','策略 vs 基准'],['drawdown','回撤'],['quantile_curves','5 分位组累计净值'],['factor_ic_bar','因子 RankIC_IR']];let ch='';for(const[k,t]of order){if(r.image_urls[k])ch+=`<h3>${t}</h3><img style="max-width:100%;border:1px solid #e1e4e8;border-radius:4px" src="${r.image_urls[k]}?v=${tag}">`;}cEl.innerHTML=ch||'本次运行未生成图表';}}
 form.addEventListener('submit',async e=>{e.preventDefault();btn.disabled=true;const resp=await fetch('/api/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(read())});const j=await resp.json();if(!j.ok){alert(j.msg||'启动失败');btn.disabled=false;}});
 document.getElementById('clear').addEventListener('click',async()=>{if(!confirm('确认清空缓存？'))return;const r=await fetch('/api/cache/clear',{method:'POST'}).then(r=>r.json());alert('已删除 '+r.deleted+' 个缓存');stats();});init();
 </script></body></html>"""

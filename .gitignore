@@ -82,6 +82,10 @@ Thumbs.db
 test_output.txt
 test_result.txt
 
+# 回测/工作流输出目录（非程序类产物，不入库）
+outputs/
+**/outputs/
+
 # Dump files
 *.dmp
 

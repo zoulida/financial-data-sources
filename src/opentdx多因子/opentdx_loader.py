@@ -238,8 +238,45 @@ class OpenTdxDataLoader:
     def _cache_path(self, name: str, payload: dict[str, Any]) -> Path:
         return self.cache_dir / f"{name}_{cache_key(payload)}.pkl"
 
+    @staticmethod
+    def _today_key() -> str:
+        """快照类缓存键：当天日期（本地时间），跨日自动失效。"""
+        return time.strftime("%Y-%m-%d")
+
+    @staticmethod
+    def _normalize_date(value: str | None) -> str:
+        """把 '2026-04-30' / '20260430' 统一成 'YYYY-MM-DD'，无法解析返回空串。"""
+        if not value:
+            return ""
+        try:
+            return pd.to_datetime(value).strftime("%Y-%m-%d")
+        except Exception:
+            return str(value)
+
+    @classmethod
+    def _effective_end(cls, end_time: str | None) -> str:
+        """K 线类的稳定 end key：min(配置 end_time, today)。"""
+        today = cls._today_key()
+        et = cls._normalize_date(end_time)
+        if not et:
+            return today
+        return min(et, today)
+
+    @staticmethod
+    def _slice_by_window(df: pd.DataFrame, start_key: str, end_key: str) -> pd.DataFrame:
+        """把 K 线 DataFrame 按 [start, end] 截断（包含端点）。空区间返回原 df。"""
+        if df.empty:
+            return df
+        out = df
+        if start_key:
+            out = out.loc[out.index >= pd.Timestamp(start_key)]
+        if end_key:
+            out = out.loc[out.index <= pd.Timestamp(end_key)]
+        return out
+
     def load_stock_list(self, markets: list[str]) -> pd.DataFrame:
-        payload = {"markets": markets, "opentdx": str(self.ctx.opentdx_path)}
+        # 股票列表：按当日缓存。股票上市/退市信息每天可能变化
+        payload = {"markets": markets, "opentdx": str(self.ctx.opentdx_path), "date": self._today_key()}
         path = self._cache_path("stock_list", payload)
         cached = read_pickle_cache(path, self.enable_cache, self.force_refresh)
         if cached is not None:
@@ -266,7 +303,8 @@ class OpenTdxDataLoader:
         return df
 
     def load_quotes(self, ts_codes: list[str], batch_size: int = 80) -> pd.DataFrame:
-        payload = {"ts_codes": sorted(ts_codes), "batch_size": batch_size}
+        # 报价是当日截面快照，缓存键带日期，跨日自动失效
+        payload = {"ts_codes": sorted(ts_codes), "batch_size": batch_size, "date": self._today_key()}
         path = self._cache_path("quotes", payload)
         cached = read_pickle_cache(path, self.enable_cache, self.force_refresh)
         if cached is not None:
@@ -274,11 +312,14 @@ class OpenTdxDataLoader:
             if isinstance(cached, pd.DataFrame) and not cached.empty:
                 cached = cached.copy()
                 cached["market_cap_yi"] = cached.apply(lambda row: estimate_market_cap_yi(row.to_dict()), axis=1)
+            print(f"  报价缓存命中: {len(ts_codes)} 只股票", flush=True)
             return cached
         pairs = [from_code_suffix(code, self.ctx.MARKET) for code in ts_codes]
         rows: list[dict[str, Any]] = []
+        batches = list(split_batches(pairs, batch_size))
+        print(f"  报价缓存未命中，开始下载 {len(ts_codes)} 只股票，{len(batches)} 批", flush=True)
         with self.ctx.TdxClient() as client:
-            for batch in split_batches(pairs, batch_size):
+            for idx, batch in enumerate(batches, start=1):
                 try:
                     records = client.stock_quotes(batch)
                 except Exception:
@@ -288,6 +329,8 @@ class OpenTdxDataLoader:
                     code = str(row.get("code", "")).zfill(6)
                     ts_code = to_code_suffix(market, code) if market is not None else code
                     rows.append({**row, "ts_code": ts_code})
+                if idx == 1 or idx == len(batches) or idx % 10 == 0:
+                    print(f"  报价下载进度 {idx}/{len(batches)}，累计 {len(rows)} 条", flush=True)
                 time.sleep(0.02)
         df = pd.DataFrame(rows).drop_duplicates(subset=["ts_code"]) if rows else pd.DataFrame()
         if not df.empty:
@@ -297,19 +340,23 @@ class OpenTdxDataLoader:
         write_pickle_cache(path, df, self.enable_cache)
         return df
 
-    def load_kline_panel(self, ts_codes: list[str], count: int = 260) -> dict[str, pd.DataFrame]:
-        # 按单只股票为粒度缓存：股票池变化时，已拉过的个股仍能复用，不必整批重拉
+    def load_kline_panel(self, ts_codes: list[str], count: int = 260,
+                          start_time: str | None = None, end_time: str | None = None) -> dict[str, pd.DataFrame]:
+        # 时间序列类：缓存键 = (ts_code, start, end)；start_time / end_time 改了就是新缓存自动重拉
+        start_key = self._normalize_date(start_time)
+        end_key = self._effective_end(end_time)
         records: dict[str, pd.DataFrame] = {}
         missing: list[tuple[str, Path]] = []
         for ts_code in ts_codes:
-            single_path = self._cache_path("kline_single", {"ts_code": ts_code, "count": int(count)})
+            key_payload = {"ts_code": ts_code, "start": start_key, "end": end_key}
+            single_path = self._cache_path("kline_single", key_payload)
             cached = read_pickle_cache(single_path, self.enable_cache, self.force_refresh)
             if isinstance(cached, pd.DataFrame) and not cached.empty:
                 records[ts_code] = cached
             else:
                 missing.append((ts_code, single_path))
         hit = len(ts_codes) - len(missing)
-        print(f"  K线缓存命中 {hit}/{len(ts_codes)}，待下载 {len(missing)}", flush=True)
+        print(f"  K线缓存命中 {hit}/{len(ts_codes)}，待下载 {len(missing)}（区间 {start_key or '~'} ~ {end_key}）", flush=True)
         if missing:
             with self.ctx.TdxClient() as client:
                 total = len(missing)
@@ -322,8 +369,9 @@ class OpenTdxDataLoader:
                         df = pd.DataFrame()
                     if not df.empty and "datetime" in df.columns:
                         df["date"] = pd.to_datetime(df["datetime"]).dt.normalize()
-                        df = df.sort_values("date").drop_duplicates(subset=["date"])
-                        df = df.set_index("date")
+                        df = df.sort_values("date").drop_duplicates(subset=["date"]).set_index("date")
+                        # 按 [start, end] 截断后再落盘：缓存内容与缓存键描述一致
+                        df = self._slice_by_window(df, start_key, end_key)
                         records[ts_code] = df
                         write_pickle_cache(single_path, df, self.enable_cache)
                     if idx == 1 or idx == total or idx % 20 == 0:
@@ -344,7 +392,8 @@ class OpenTdxDataLoader:
         missing: list[tuple[str, Path]] = []
         cached_rows: dict[str, dict[str, Any]] = {}
         for ts_code in ts_codes:
-            single_path = self._cache_path("capital_flow_single", {"ts_code": ts_code})
+            # 资金流是当日截面快照，缓存键带日期，跨日自动失效
+            single_path = self._cache_path("capital_flow_single", {"ts_code": ts_code, "date": self._today_key()})
             cached = read_pickle_cache(single_path, self.enable_cache, self.force_refresh)
             if isinstance(cached, dict):
                 cached_rows[ts_code] = cached
@@ -372,8 +421,36 @@ class OpenTdxDataLoader:
             rows.append({"ts_code": ts_code, **row})
         return pd.DataFrame(rows)
 
+    def load_index_kline(self, ts_code: str, count: int = 360,
+                          start_time: str | None = None, end_time: str | None = None) -> pd.DataFrame:
+        """加载指数日 K 线，缓存键 = (index_ts_code, start, end)。"""
+        start_key = self._normalize_date(start_time)
+        end_key = self._effective_end(end_time)
+        payload = {"index_ts_code": ts_code, "start": start_key, "end": end_key}
+        path = self._cache_path("index_kline", payload)
+        cached = read_pickle_cache(path, self.enable_cache, self.force_refresh)
+        if isinstance(cached, pd.DataFrame) and not cached.empty:
+            print(f"  指数K线缓存命中: {ts_code}（index_kline，不使用个股缓存）", flush=True)
+            return cached
+        market, code = from_code_suffix(ts_code, self.ctx.MARKET)
+        print(f"  指数K线缓存未命中: {ts_code} -> market={market}, code={code}", flush=True)
+        try:
+            with self.ctx.TdxClient() as client:
+                data = client.stock_kline(market, code, self.ctx.PERIOD.DAILY, count=count, adjust=self.ctx.ADJUST.NONE)
+                df = pd.DataFrame(data)
+        except Exception as exc:
+            print(f"⚠️ 指数 K 线加载失败 {ts_code}: {exc}")
+            df = pd.DataFrame()
+        if not df.empty and "datetime" in df.columns:
+            df["date"] = pd.to_datetime(df["datetime"]).dt.normalize()
+            df = df.sort_values("date").drop_duplicates(subset=["date"]).set_index("date")
+            df = self._slice_by_window(df, start_key, end_key)
+        write_pickle_cache(path, df, self.enable_cache)
+        return df
+
     def load_monitor_events(self, markets: list[str], count: int = 5000) -> pd.DataFrame:
-        payload = {"markets": markets, "count": count}
+        # 异动是当日近实时事件，缓存键带日期，跨日自动失效
+        payload = {"markets": markets, "count": count, "date": self._today_key()}
         path = self._cache_path("monitor", payload)
         cached = read_pickle_cache(path, self.enable_cache, self.force_refresh)
         if cached is not None:
