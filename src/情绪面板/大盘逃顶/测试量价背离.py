@@ -3,6 +3,9 @@
 诊断为什么没有显示得分
 """
 
+from pathlib import Path
+import sys
+
 def test_xtquant():
     """测试 XtQuant 数据源"""
     print("=" * 70)
@@ -102,26 +105,36 @@ def test_xtquant():
         traceback.print_exc()
 
 
-def test_akshare():
-    """测试 akshare 数据源"""
+def test_opentdx():
+    """测试 OpenTDX 数据源"""
     print("\n" + "=" * 70)
-    print("测试 akshare - 量价背离数据获取")
+    print("测试 OpenTDX - 量价背离数据获取")
     print("=" * 70)
     
     try:
-        import akshare as ak
-        print("\n[1/3] ✓ akshare 已安装")
+        project_root = Path(__file__).resolve().parents[3]
+        opentdx_root = project_root / "md" / "通达信" / "opentdx-main"
+        if str(opentdx_root) not in sys.path:
+            sys.path.insert(0, str(opentdx_root))
+
+        import pandas as pd
+        from opentdx.const import MARKET, PERIOD
+        from opentdx.tdxClient import TdxClient
+
+        print("\n[1/3] ✓ OpenTDX 已加载")
         
-        print(f"\n[2/3] 正在获取上证指数数据...")
+        print(f"\n[2/3] 正在获取上证指数数据 (999999.SH)...")
         
-        # 获取上证指数历史数据
-        df = ak.stock_zh_index_daily(symbol="sh000001")
+        with TdxClient() as client:
+            bars = client.stock_kline(MARKET.SH, "999999", PERIOD.DAILY, count=6)
+
+        df = pd.DataFrame(bars)
         
         if df is not None and len(df) >= 6:
             print(f"  ✓ 数据获取成功")
             
-            df = df.sort_values('date', ascending=False).head(6)
-            df = df.sort_values('date', ascending=True)
+            date_col = "datetime" if "datetime" in df.columns else "date"
+            df = df.sort_values(date_col, ascending=True).tail(6).reset_index(drop=True)
             
             print(f"\n[3/3] 数据解析:")
             print(f"  数据点数: {len(df)}")
@@ -132,14 +145,14 @@ def test_akshare():
             
             for i in range(len(df)):
                 row = df.iloc[i]
-                date = row['date'].strftime('%Y-%m-%d') if hasattr(row['date'], 'strftime') else str(row['date'])
+                date = row[date_col].strftime('%Y-%m-%d') if hasattr(row[date_col], 'strftime') else str(row[date_col])
                 close = row['close']
-                volume = row['volume'] / 10000
+                volume = row['vol'] / 10000
                 
                 if i > 0:
                     prev = df.iloc[i-1]
                     price_change = (close - prev['close']) / prev['close'] * 100
-                    volume_change = (volume - prev['volume']/10000) / (prev['volume']/10000) * 100
+                    volume_change = (volume - prev['vol']/10000) / (prev['vol']/10000) * 100
                     print(f"  {date} | {close:>10.2f} | {volume:>15.2f} | {price_change:>+7.2f}% | {volume_change:>+7.2f}%")
                 else:
                     print(f"  {date} | {close:>10.2f} | {volume:>15.2f} | {'--':>8s} | {'--':>8s}")
@@ -153,13 +166,13 @@ def test_akshare():
             for i in range(1, 6):
                 row = df.iloc[i]
                 prev = df.iloc[i-1]
-                date = row['date'].strftime('%Y-%m-%d') if hasattr(row['date'], 'strftime') else str(row['date'])
+                date = row[date_col].strftime('%Y-%m-%d') if hasattr(row[date_col], 'strftime') else str(row[date_col])
                 
                 # 当日收盘价涨
                 price_up = row['close'] > prev['close']
                 
                 # 成交量萎缩≥20%
-                volume_shrink_rate = (prev['volume'] - row['volume']) / prev['volume']
+                volume_shrink_rate = (prev['vol'] - row['vol']) / prev['vol']
                 volume_shrink = volume_shrink_rate >= 0.20
                 
                 is_divergence = price_up and volume_shrink
@@ -178,15 +191,15 @@ def test_akshare():
             print(f"\n  量价背离天数: {divergence_days}")
             print(f"  得分: {score:.2f}")
             
-            print("\n✅ akshare 数据源测试完成！")
+            print("\n✅ OpenTDX 数据源测试完成！")
         else:
             print(f"  ✗ 数据不足：需要至少6个交易日数据")
             
     except ImportError:
-        print(f"\n✗ akshare 未安装")
-        print(f"  提示：pip install akshare")
+        print(f"\n✗ OpenTDX 加载失败")
+        print(f"  提示：请检查 md/通达信/opentdx-main 是否存在")
     except Exception as e:
-        print(f"\n✗ akshare 测试失败: {e}")
+        print(f"\n✗ OpenTDX 测试失败: {e}")
         import traceback
         traceback.print_exc()
 
@@ -200,14 +213,14 @@ if __name__ == "__main__":
     # 测试 XtQuant
     test_xtquant()
     
-    # 测试 akshare
-    test_akshare()
+    # 测试 OpenTDX
+    test_opentdx()
     
     print("\n" + "=" * 70)
     print("测试完成！")
     print("=" * 70)
     print("\n提示:")
-    print("  1. 如果 XtQuant 测试失败，会自动使用 akshare")
+    print("  1. 如果 XtQuant 测试失败，会自动使用 OpenTDX")
     print("  2. 如果两者都失败，将返回 0 分")
     print("  3. 最新版本(v1.0.5)已修复：数据获取失败时也会显示得分")
 
